@@ -206,7 +206,7 @@ void drawFinder(Session &session) {
         if (!keep)
             continue;
         if (target.kind == Target::Command)
-            if (const auto *c = session.command(target.command); c && c->enabled && !c->enabled())
+            if (const auto *c = session.command(target.command); c && (!Session::enabled(*c) || !Session::applies(*c)))
                 continue;
         choices.push_back(target.choice);
         targets.push_back(&target);
@@ -617,6 +617,87 @@ void drawDialogs(Session &session) {
     }
 }
 
+const std::vector<std::pair<const char *, const char *>> &canvasKeys() {
+    static const std::vector<std::pair<const char *, const char *>> keys{
+        {"Up", "parent (left-right layout: Left)"},
+        {"Down", "first child, or back to the one you came from"},
+        {"Left / Right", "previous / next sibling, or the nearest node on that level"},
+        {"Home", "the tree's root"},
+        {"Shift+arrows", "move and add both nodes to the selection"},
+        {"Ctrl+arrows", "move without changing the selection"},
+        {"Shift+Home / Shift+End", "select up to the first / last sibling"},
+        {"Alt+Left / Alt+Right", "move the node earlier / later among its siblings"},
+        {"Alt+Up", "move the node out of its parent"},
+        {"Alt+Down", "move the node into the previous sibling"},
+        {"Space", "fold / unfold; on a SubTree call, open it in place"},
+        {"Esc", "clear the selection and the key highlight"},
+        {"Ctrl+= / Ctrl+-", "zoom in / out (Ctrl+wheel: at the mouse)"},
+        {"Click", "select; Ctrl+click or Shift+click adds or removes"},
+        {"Shift+drag", "select a box (on empty canvas)"},
+        {"Drag a node", "move it (and the selection): beside a node, or into it"},
+        {"Double-click", "edit the node; on a call, open its tree"},
+        {"Drag", "pan (empty canvas; also the middle button)"},
+    };
+    return keys;
+}
+
+void drawShortcuts(Session &session) {
+    if (!session.showShortcuts)
+        return;
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
+    ImGui::SetNextWindowSize({ui(620), display.y * .75f}, ImGuiCond_Appearing);
+    ImGui::SetNextWindowPos({display.x / 2, display.y / 2}, ImGuiCond_Appearing, {.5f, .5f});
+    if (!ImGui::Begin("Keyboard shortcuts", &session.showShortcuts, ImGuiWindowFlags_NoDocking)) {
+        ImGui::End();
+        return;
+    }
+    static std::string filter;
+    if (ImGui::IsWindowAppearing())
+        ImGui::SetKeyboardFocusHere();
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    inputStringWithHint("##keys", "Filter (a key or what it does)", filter);
+    if (ImGui::IsItemActive() && ImGui::IsKeyPressed(ImGuiKey_Escape))
+        session.showShortcuts = false;
+    const auto shown = [&](const std::string &a, const std::string &b) {
+        return filter.empty() || fuzzyMatch(filter, a).matched || fuzzyMatch(filter, b).matched;
+    };
+    const auto table = [&](const char *id, const std::vector<std::pair<std::string, std::string>> &rows) {
+        if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit))
+            return;
+        ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthFixed, ui(190));
+        ImGui::TableSetupColumn("What", ImGuiTableColumnFlags_WidthStretch);
+        for (const auto &[keys, what] : rows) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextColored(palette().accent, "%s", keys.c_str());
+            ImGui::TableNextColumn();
+            ImGui::TextWrapped("%s", what.c_str());
+        }
+        ImGui::EndTable();
+    };
+    ImGui::BeginChild("##shortcuts");
+    std::vector<std::pair<std::string, std::string>> rows;
+    for (const auto &[keys, what] : canvasKeys())
+        if (shown(keys, what))
+            rows.push_back({keys, what});
+    if (!rows.empty()) {
+        sectionTitle("Canvas");
+        table("##canvas", rows);
+    }
+    for (const char *group : {"File", "Edit", "Select", "Node", "Tree", "View", "Help"}) {
+        rows.clear();
+        for (const auto &c : session.commands)
+            if (c.group == group && c.chord && c.id != "edit.redo2" && shown(chordName(c.chord), c.label))
+                rows.push_back({chordName(c.chord), c.label});
+        if (rows.empty())
+            continue;
+        sectionTitle(group);
+        table(group, rows);
+    }
+    ImGui::EndChild();
+    ImGui::End();
+}
+
 void handleShortcuts(Session &session) {
     if (session.showFinder || session.picker.open || session.dialog.kind != Session::Dialog::None ||
         !session.conflicts.empty() || ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId))
@@ -629,8 +710,8 @@ void handleShortcuts(Session &session) {
             pressed = session.canvasFocused && ImGui::IsKeyChordPressed(command.chord);
         else
             pressed = ImGui::Shortcut(command.chord, ImGuiInputFlags_RouteGlobal);
-        if (pressed && (!command.enabled || command.enabled())) {
-            command.run();
+        if (pressed) {
+            session.run(command.id);
             break;
         }
     }

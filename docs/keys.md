@@ -1,7 +1,8 @@
 # Keyboard
 
-Everything in notgroot can be done from the keyboard. Every command is also listed under Ctrl+Shift+P, with its key.
-Keys marked *canvas* work while the canvas has focus (click it, or press Esc in a text field to get back to it).
+Everything in notgroot can be done from the keyboard. Every command is also listed under Ctrl+Shift+P, with its key,
+and F1 (Help > Keyboard shortcuts) shows this list in the editor, with a filter. Keys marked *canvas* work while the
+canvas has focus (click it, or press Esc in a text field to get back to it).
 
 ## Finding things
 
@@ -34,17 +35,32 @@ In the default top-down layout:
 | ↑ | the parent |
 | ↓ | the first child (or back to the child you came up from) |
 | ← / → | the previous / next sibling, or the nearest node on the same level |
-| Shift + ← / → | the sibling, and adds both nodes to the selection |
+| Shift + arrows | there, and adds both nodes to the selection |
+| Ctrl + arrows | there, and leaves the selection as it is |
 | Home | the tree's root |
 | Esc | clears the selection and the key highlight |
 
 In the left-right layout (Ctrl+L) the arrows turn with the tree: ← parent, → child, ↑/↓ siblings.
 
+## Selecting (*canvas*)
+
+| Key | Selects |
+|---|---|
+| Ctrl+A | the cursor's siblings; press it again for every node of the tree |
+| Ctrl+Shift+A | the node and everything under it |
+| Ctrl+Shift+L | every node of the cursor's type (calls: of the same subtree) |
+| Ctrl+Space | adds the cursor's node to the selection, or takes it out |
+| Shift+Home / Shift+End | up to the first / last sibling |
+
+Wrap and extract work on nodes under one parent; delete, copy, cut and duplicate on any selection.
+
+## Viewing (*canvas*)
+
 | Key | View |
 |---|---|
 | Space | fold / unfold a node; on a SubTree call, open the subtree in place (read-only) |
 | Ctrl+Enter | open the subtree's own tree (on a call or on a node opened in place) |
-| Ctrl+= / Ctrl+- | zoom in / out (Ctrl+mouse wheel zooms at the mouse) |
+| Ctrl+= / Ctrl+- | zoom in / out a step (Ctrl+mouse wheel zooms at the mouse) |
 | Ctrl+0 | fit the tree to the view |
 | Ctrl+L | switch between top-down and left-right layout |
 | Ctrl+PageDown / Ctrl+PageUp | next / previous tree tab |
@@ -90,3 +106,17 @@ The `{}` button beside a value turns text into a key (`2` → `{2}`) and back.
 | Ctrl+S | save every changed file. Includes are fixed up, then the BehaviorTree.CPP check runs |
 | Ctrl+O | open a trees folder |
 | Ctrl+Q | quit. If there are unsaved changes, it asks first |
+| F1 | this list, in the editor |
+
+## Mouse
+
+| Mouse | Does |
+|---|---|
+| Click | puts the cursor on a node. Ctrl+click or Shift+click adds it to the selection or takes it out |
+| Shift + drag on empty canvas | selects the nodes in the box (with Ctrl: adds them) |
+| Drag a node | moves it, with the rest of the selection when it is selected. Dropped on the ends of a node it goes beside it; on the middle, inside it as the last child. A red cross: it can't go there |
+| Double-click | edits the node; on a SubTree call, opens its tree |
+| The round button under a call | opens the subtree in place, read-only (as Space) |
+| Right-click | the node's menu: what applies to it, greyed with the reason when it can't run now |
+| Drag on empty canvas, or the middle button | pans |
+| Wheel / Shift+wheel / Ctrl+wheel | scroll / scroll sideways / zoom |

@@ -447,9 +447,40 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
         const ImVec2 at = session.horizontal ? ImVec2(b.x + ui(6) * z, (a.y + b.y) / 2 - h / 2)
                                              : ImVec2((a.x + b.x) / 2 - w / 2, b.y + ui(6) * z);
         draw->AddRectFilled(at, {at.x + w, at.y + h}, ImGui::GetColorU32(style.Colors[ImGuiCol_Button]), h / 2);
-        text(draw, view.body, view.bodySize, {at.x + m.pad * z / 2, at.y + ui(2) * z}, ImGui::GetColorU32(palette().muted),
-             label);
+        text(draw, view.body, view.bodySize, {at.x + m.pad * z / 2, at.y + ui(2) * z},
+             ImGui::GetColorU32(palette().muted), label);
     }
+}
+
+// The round button under a SubTree call that opens it in place (beside it in the left-right layout).
+bool caret(const Card &card, const View &view, bool horizontal, ImVec2 &centre, float &radius) {
+    if (!card.call || card.key.readOnly())
+        return false;
+    const ImVec2 a = view.at(card.position),
+                 b = view.at({card.position.x + card.size.x, card.position.y + card.size.y});
+    radius = std::max(5.f, ui(7) * view.zoom);
+    const float gap = ui(3) * view.zoom + radius;
+    centre = horizontal ? ImVec2(b.x + gap, (a.y + b.y) / 2) : ImVec2((a.x + b.x) / 2, b.y + gap);
+    return true;
+}
+
+void drawCaret(const Card &card, const View &view, ImDrawList *draw, bool horizontal, bool hot) {
+    ImVec2 c;
+    float r = 0;
+    if (!caret(card, view, horizontal, c, r))
+        return;
+    const auto &style = ImGui::GetStyle();
+    const ImVec4 band = !card.color.empty() ? subtreeColor(card.color) : categoryColor(Category::SubTree);
+    draw->AddCircleFilled(c, r, ImGui::GetColorU32(style.Colors[hot ? ImGuiCol_ButtonHovered : ImGuiCol_Button]));
+    draw->AddCircle(c, r, ImGui::GetColorU32(withAlpha(band, .9f)), 0, std::max(1.f, ui(1.2f) * view.zoom));
+    // A chevron pointing the way it unfolds (back when open).
+    const float s = r * .45f;
+    const float d = card.opened ? -1.f : 1.f;
+    const ImVec2 p0 = horizontal ? ImVec2(c.x - s * .5f * d, c.y - s) : ImVec2(c.x - s, c.y - s * .5f * d);
+    const ImVec2 p1 = horizontal ? ImVec2(c.x + s * .5f * d, c.y) : ImVec2(c.x, c.y + s * .5f * d);
+    const ImVec2 p2 = horizontal ? ImVec2(c.x - s * .5f * d, c.y + s) : ImVec2(c.x + s, c.y - s * .5f * d);
+    const ImVec2 chevron[] = {p0, p1, p2};
+    draw->AddPolyline(chevron, 3, ImGui::GetColorU32(palette().text), 0, std::max(1.2f, ui(1.6f) * view.zoom));
 }
 
 // --- keyboard ---
@@ -493,11 +524,27 @@ void navigate(Session &session, const Scene &scene, int current) {
     const ImGuiKey toNext = h ? ImGuiKey_DownArrow : ImGuiKey_RightArrow;
     const auto &io = ImGui::GetIO();
     const bool plain = !io.KeyCtrl && !io.KeyAlt;
+    // Ctrl moves the cursor and leaves the selection alone (Ctrl+Space then adds the node).
+    const bool steer = plain || (io.KeyCtrl && !io.KeyAlt && !io.KeyShift);
+
+    // Shift+Home / End: the selection runs to the first / last sibling.
+    if (io.KeyShift && !io.KeyCtrl && !io.KeyAlt && card.parent >= 0 && !card.key.readOnly() &&
+        (ImGui::IsKeyPressed(ImGuiKey_Home) || ImGui::IsKeyPressed(ImGuiKey_End))) {
+        const auto &siblings = scene.cards[std::size_t(card.parent)].children;
+        const auto at = std::find(siblings.begin(), siblings.end(), current) - siblings.begin();
+        const bool home = ImGui::IsKeyPressed(ImGuiKey_Home);
+        const long from = home ? 0 : at, to = home ? at : long(siblings.size()) - 1;
+        for (long i = from; i <= to; ++i)
+            if (const auto &ref = scene.cards[std::size_t(siblings[std::size_t(i)])].key.ref; !session.selected(ref))
+                session.toggleSelected(ref);
+        session.setCursor(scene.cards[std::size_t(siblings[std::size_t(home ? from : to)])].key, true);
+        return;
+    }
 
     int target = -1;
-    if (plain && ImGui::IsKeyPressed(toParent))
+    if (steer && ImGui::IsKeyPressed(toParent))
         target = card.parent;
-    else if (plain && ImGui::IsKeyPressed(toChild) && !card.children.empty()) {
+    else if (steer && ImGui::IsKeyPressed(toChild) && !card.children.empty()) {
         // Back down to the child we came up from, if any.
         static CardKey lastChild;
         target = card.children.front();
@@ -505,9 +552,9 @@ void navigate(Session &session, const Scene &scene, int current) {
             if (scene.cards[std::size_t(c)].key == lastChild)
                 target = c;
         lastChild = {};
-    } else if (plain && ImGui::IsKeyPressed(toPrevious))
+    } else if (steer && ImGui::IsKeyPressed(toPrevious))
         target = neighbour(scene, current, false, h);
-    else if (plain && ImGui::IsKeyPressed(toNext))
+    else if (steer && ImGui::IsKeyPressed(toNext))
         target = neighbour(scene, current, true, h);
     else if (plain && ImGui::IsKeyPressed(ImGuiKey_Home))
         target = 0;
@@ -521,7 +568,7 @@ void navigate(Session &session, const Scene &scene, int current) {
                 session.toggleSelected(to.key.ref);
             session.setCursor(to.key, true);
         } else
-            session.setCursor(to.key);
+            session.setCursor(to.key, io.KeyCtrl);
         return;
     }
 
@@ -614,23 +661,92 @@ void searchBar(Session &session, const Scene &scene, int current) {
     }
 }
 
+// The node menu: only what applies to the node; what can't run right now is greyed, with the reason.
 void contextMenu(Session &session) {
     if (!ImGui::BeginPopup("##card"))
         return;
-    const auto item = [&](const char *id) {
-        const auto *c = session.command(id);
-        if (c && ImGui::MenuItem(c->label.c_str(), chordName(c->chord).c_str(), false, !c->enabled || c->enabled()))
-            c->run();
+    bool any = false, separate = false;
+    const auto group = [&](std::initializer_list<const char *> ids) {
+        separate = any;
+        for (const char *id : ids) {
+            const auto *c = session.command(id);
+            if (!c || !Session::applies(*c))
+                continue;
+            if (separate)
+                ImGui::Separator();
+            separate = false;
+            any = true;
+            const bool on = Session::enabled(*c);
+            if (ImGui::MenuItem(c->label.c_str(), chordName(c->chord).c_str(), false, on))
+                c->run();
+            if (!on && c->why && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("%s", c->why().c_str());
+        }
     };
-    for (const char *id : {"node.child", "node.sibling", "node.wrap", "node.retype", "node.unwrap"})
-        item(id);
-    ImGui::Separator();
-    for (const char *id : {"node.definition", "tree.extract", "tree.ports"})
-        item(id);
-    ImGui::Separator();
-    for (const char *id : {"edit.cut", "edit.copy", "edit.paste", "edit.duplicate", "edit.delete"})
-        item(id);
+    if (session.cursor.ref.isTree() && !session.cursor.readOnly()) {
+        group({"node.child", "edit.paste"});
+        group({"tree.rename", "tree.ports"});
+    } else {
+        group({"node.child", "node.sibling", "node.wrap", "node.retype", "node.unwrap"});
+        group({"node.definition", "tree.extract", "tree.ports"});
+        group({"edit.cut", "edit.copy", "edit.paste", "edit.duplicate", "edit.delete"});
+        group({"select.below", "select.sameType", "select.siblings"});
+    }
     ImGui::EndPopup();
+}
+
+// --- mouse: dragging nodes ---
+
+// Where dragged nodes would land: under `parent`, before its nodeIndex-th child.
+struct Drop {
+    int card = -1; // the card the mouse is on
+    int edge = 0;  // -1 before it, 1 after it, 0 into it
+    bool ok = false;
+    NodeRef parent;
+    std::size_t index = 0;
+};
+
+std::size_t nodeIndexIn(const Element &element) {
+    const auto siblings = nodeChildren(*element.parent);
+    return std::size_t(std::find(siblings.begin(), siblings.end(), &element) - siblings.begin());
+}
+
+Drop dropAt(Session &session, const Scene &scene, int under, ImVec2 mouse, ImVec2 a, ImVec2 b,
+            const std::vector<NodeRef> &moving) {
+    Drop drop;
+    drop.card = under;
+    if (under < 0)
+        return drop;
+    const auto &card = scene.cards[std::size_t(under)];
+    if (card.key.readOnly())
+        return drop;
+    // The ends of a card along the siblings' axis put the nodes beside it; the middle, inside it.
+    const float along = session.horizontal ? (mouse.y - a.y) / (b.y - a.y) : (mouse.x - a.x) / (b.x - a.x);
+    const auto *element = resolve(session.workspace, card.key.ref);
+    if (!element)
+        return drop;
+    const bool container = card.root || maxChildren(card.category) != 0;
+    drop.edge = card.root ? 0 : along < .25f ? -1 : along > .75f ? 1 : container ? 0 : along < .5f ? -1 : 1;
+    if (drop.edge == 0) {
+        drop.parent = card.key.ref;
+        drop.index = nodeChildren(*element).size();
+    } else {
+        drop.parent = card.key.ref.parent();
+        drop.index = nodeIndexIn(*element) + (drop.edge > 0 ? 1 : 0);
+    }
+    // Not into themselves, and not past what the parent takes.
+    const auto *parent = resolve(session.workspace, drop.parent);
+    int arriving = 0;
+    for (const auto &ref : moving) {
+        if (ref.tree != drop.parent.tree || ref == drop.parent || isAncestor(ref, drop.parent))
+            return drop;
+        const auto *node = resolve(session.workspace, ref);
+        arriving += node && node->parent != parent;
+    }
+    const int most =
+        parent->tag == "BehaviorTree" ? 1 : maxChildren(nodeCategory(*parent, session.workspace.catalog()));
+    drop.ok = most < 0 || int(nodeChildren(*parent).size()) + arriving <= most;
+    return drop;
 }
 } // namespace
 
@@ -789,23 +905,91 @@ void drawCanvas(Session &session) {
             }
         }
 
-    // Mouse: click selects (Ctrl adds), double-click edits or opens a subtree, drag on empty space pans.
-    static bool panning = false;
-    if (ImGui::IsItemClicked(ImGuiMouseButton_Left) || ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+    // The open-in-place button under a call is hit before the cards.
+    int caretUnder = -1;
+    if (hovered)
+        for (std::size_t i = 0; i < current.cards.size(); ++i) {
+            ImVec2 c;
+            float r = 0;
+            if (caret(current.cards[i], v, session.horizontal, c, r) &&
+                std::hypot(io.MousePos.x - c.x, io.MousePos.y - c.y) <= r + 1) {
+                caretUnder = int(i);
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                ImGui::SetTooltip(current.cards[i].opened ? "Close in place (Space)"
+                                                          : "Open in place (Space); double-click the call for its tab");
+            }
+        }
+
+    // Mouse: click selects (Ctrl or Shift adds), double-click edits or opens a subtree, dragging a node moves it,
+    // Shift+drag on empty space selects a box, other drags there pan.
+    static bool panning = false, boxing = false, dragging = false;
+    static CardKey pressed;
+    static ImVec2 pressAt;
+    const bool left = ImGui::IsItemClicked(ImGuiMouseButton_Left), right = ImGui::IsItemClicked(ImGuiMouseButton_Right);
+    if (left && caretUnder >= 0) {
+        const auto &card = current.cards[std::size_t(caretUnder)];
+        if (!view.opened.erase(card.key.ref.path))
+            view.opened.insert(card.key.ref.path);
+        session.setCursor(card.key);
+    } else if (left || right) {
         if (under >= 0) {
             const auto &card = current.cards[std::size_t(under)];
-            if (io.KeyCtrl && !card.key.readOnly() && !card.root) {
+            if (left && (io.KeyCtrl || io.KeyShift) && !card.key.readOnly() && !card.root) {
                 session.toggleSelected(card.key.ref);
                 session.setCursor(card.key, true);
-            } else if (!(ImGui::IsItemClicked(ImGuiMouseButton_Right) && session.selected(card.key.ref)))
-                session.setCursor(card.key);
+            } else
+                session.setCursor(card.key, session.selected(card.key.ref)); // a selection stays, to drag or act on
             session.revealPending = false;
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+            if (left) {
+                pressed = card.key;
+                pressAt = io.MousePos;
+            } else
                 ImGui::OpenPopup("##card");
-        } else if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+        } else if (left && io.KeyShift) {
+            boxing = true;
+            pressAt = io.MousePos;
+        } else if (left)
             panning = true;
     }
-    if (hovered && under >= 0 && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+    if (!pressed.ref.empty() && !dragging && !pressed.readOnly() && !pressed.ref.isTree() &&
+        ImGui::IsMouseDragging(ImGuiMouseButton_Left, ui(6)))
+        dragging = true;
+    const auto moving =
+        session.selected(pressed.ref) ? outermost(session.selection) : std::vector<NodeRef>{pressed.ref};
+    Drop drop;
+    if (dragging && under >= 0) {
+        const auto &card = current.cards[std::size_t(under)];
+        drop = dropAt(session, current, under, io.MousePos, v.at(card.position),
+                      v.at({card.position.x + card.size.x, card.position.y + card.size.y}), moving);
+    }
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+        if (dragging && drop.ok)
+            session.edited(session.editor.relocate(moving, drop.parent, drop.index));
+        else if (!dragging && !pressed.ref.empty() && !io.KeyCtrl && !io.KeyShift && session.selection.size() > 1 &&
+                 session.selected(pressed.ref))
+            session.setCursor(pressed); // a plain click in a selection picks that node alone
+        if (boxing) {
+            const ImVec2 lo{std::min(pressAt.x, io.MousePos.x), std::min(pressAt.y, io.MousePos.y)};
+            const ImVec2 hi{std::max(pressAt.x, io.MousePos.x), std::max(pressAt.y, io.MousePos.y)};
+            if (!io.KeyCtrl)
+                session.selection.clear();
+            for (const auto &card : current.cards) {
+                const ImVec2 a = v.at(card.position),
+                             b = v.at({card.position.x + card.size.x, card.position.y + card.size.y});
+                if (card.root || card.key.readOnly() || b.x < lo.x || a.x > hi.x || b.y < lo.y || a.y > hi.y ||
+                    session.selected(card.key.ref))
+                    continue;
+                session.selection.push_back(card.key.ref);
+            }
+            if (!session.selection.empty()) {
+                session.setCursor(CardKey{session.selection.front(), {}}, true);
+                session.revealPending = false;
+            }
+        }
+        boxing = dragging = false;
+        pressed = {};
+    }
+    if (hovered && under >= 0 && caretUnder < 0 && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
         const auto &card = current.cards[std::size_t(under)];
         if (card.call || card.key.readOnly())
             session.run("node.definition");
@@ -846,8 +1030,8 @@ void drawCanvas(Session &session) {
         navigate(session, current, cursorIndex);
     cursorIndex = current.find(session.cursor);
 
-    // Keep the cursor in view after it moves.
-    if (session.revealPending && cursorIndex >= 0) {
+    // Keep the cursor in view after it moves (once the layout has caught up with a fold or an open).
+    if (session.revealPending && cursorIndex >= 0 && signature(session) == current.signature) {
         const auto &card = current.cards[std::size_t(cursorIndex)];
         const float margin = ui(40);
         const ImVec2 a = v.at(card.position), b = v.at({card.position.x + card.size.x, card.position.y + card.size.y});
@@ -884,6 +1068,52 @@ void drawCanvas(Session &session) {
         drawCard(session, card, v, draw, m, int(i) == cursorIndex,
                  !card.key.readOnly() && session.selected(card.key.ref),
                  session.showSearch && cardMatches(card, session.search), severity);
+        drawCaret(card, v, draw, session.horizontal, int(i) == caretUnder);
+    }
+
+    // Box selection, and where dragged nodes would land.
+    if (boxing) {
+        draw->AddRectFilled(pressAt, io.MousePos, ImGui::GetColorU32(withAlpha(palette().accent, .12f)));
+        draw->AddRect(pressAt, io.MousePos, ImGui::GetColorU32(withAlpha(palette().accent, .8f)), 0, 0, ui(1));
+    }
+    if (dragging) {
+        if (drop.card >= 0) {
+            const auto &card = current.cards[std::size_t(drop.card)];
+            const ImVec2 a = v.at(card.position),
+                         b = v.at({card.position.x + card.size.x, card.position.y + card.size.y});
+            const ImU32 ink = ImGui::GetColorU32(drop.ok ? palette().accent : palette().error);
+            const float width = std::max(2.f, ui(3) * v.zoom), gap = ui(9) * v.zoom;
+            if (!drop.ok) {
+                draw->AddRect({a.x - gap / 2, a.y - gap / 2}, {b.x + gap / 2, b.y + gap / 2}, ink, ui(5) * v.zoom, 0,
+                              width);
+                // A cross beside it: can't go here.
+                const float r = ui(6) * v.zoom;
+                const ImVec2 c{b.x + gap + r, a.y + r};
+                draw->AddLine({c.x - r, c.y - r}, {c.x + r, c.y + r}, ink, width);
+                draw->AddLine({c.x - r, c.y + r}, {c.x + r, c.y - r}, ink, width);
+            } else if (drop.edge == 0)
+                draw->AddRect({a.x - gap / 2, a.y - gap / 2}, {b.x + gap / 2, b.y + gap / 2}, ink, ui(5) * v.zoom, 0,
+                              width);
+            else if (session.horizontal) {
+                const float y = drop.edge < 0 ? a.y - gap : b.y + gap;
+                draw->AddLine({a.x, y}, {b.x, y}, ink, width);
+            } else {
+                const float x = drop.edge < 0 ? a.x - gap : b.x + gap;
+                draw->AddLine({x, a.y}, {x, b.y}, ink, width);
+            }
+        }
+        // The dragged node beside the pointer, with how many go along.
+        const auto &pressedCard = current.cards[std::size_t(std::max(0, current.find(pressed)))];
+        std::string label = pressedCard.title;
+        if (moving.size() > 1)
+            label += "  +" + std::to_string(moving.size() - 1);
+        const ImVec2 at{io.MousePos.x + ui(14), io.MousePos.y + ui(10)};
+        const ImVec2 extent = ImGui::CalcTextSize(label.c_str());
+        draw->AddRectFilled(at, {at.x + extent.x + ui(16), at.y + extent.y + ui(8)},
+                            ImGui::GetColorU32(withAlpha(categoryColor(pressedCard.category), .85f)), ui(4));
+        draw->AddText({at.x + ui(8), at.y + ui(4)}, ImGui::GetColorU32(inkOnCategory(pressedCard.category)),
+                      label.c_str());
+        ImGui::SetMouseCursor(drop.ok ? ImGuiMouseCursor_ResizeAll : ImGuiMouseCursor_NotAllowed);
     }
     draw->PopClipRect();
 
@@ -898,7 +1128,7 @@ void drawCanvas(Session &session) {
         session.picker.anchor = {start.x + ui(20), start.y + ui(20)};
 
     // Tooltip: the card's problems and comment.
-    if (under >= 0 && !ImGui::IsPopupOpen("##card")) {
+    if (under >= 0 && !dragging && !ImGui::IsPopupOpen("##card")) {
         const auto &card = current.cards[std::size_t(under)];
         std::vector<const Problem *> here;
         if (!card.key.readOnly())

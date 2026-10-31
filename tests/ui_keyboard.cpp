@@ -3,6 +3,7 @@
 #include "notgroot/ui/panels.hpp"
 #include "notgroot/ui/theme.hpp"
 #include "test_support.hpp"
+#include <fstream>
 #include <gtest/gtest.h>
 
 using namespace notgroot;
@@ -191,4 +192,64 @@ TEST_F(Harness, ExtractSelectionAndRenameKey) {
     type("goal_x");
     press(ImGuiKey_Enter);
     EXPECT_TRUE(session.workspace.catalog().find("Move")->port("goal_x"));
+}
+
+TEST_F(Harness, NodeMenuOffersOnlyWhatApplies) {
+    const auto applies = [&](const char *id) { return ui::Session::applies(*session.command(id)); };
+    const core::NodeRef sequence{"Toy.xml", {0}};
+    session.setCursor(sequence.child(2)); // Info: a leaf, not a call
+    EXPECT_FALSE(applies("node.definition"));
+    EXPECT_FALSE(applies("tree.ports"));
+    EXPECT_FALSE(applies("node.child"));
+    EXPECT_FALSE(applies("node.unwrap"));
+    EXPECT_TRUE(applies("edit.delete"));
+    session.setCursor(sequence.child(3)); // SubTree Move
+    EXPECT_TRUE(applies("node.definition"));
+    EXPECT_TRUE(applies("tree.ports"));
+    session.setCursor(sequence);
+    EXPECT_TRUE(applies("node.unwrap"));
+    EXPECT_TRUE(applies("node.child"));
+    session.setCursor(core::NodeRef{"Toy.xml", {}});
+    EXPECT_FALSE(applies("edit.delete"));
+    EXPECT_TRUE(applies("node.child"));
+
+    // Wrap needs one parent: greyed, with the reason, for nodes from two levels.
+    session.selection = {sequence.child(2), sequence.child(4).child(0)};
+    EXPECT_FALSE(ui::Session::enabled(*session.command("node.wrap")));
+    EXPECT_FALSE(session.command("node.wrap")->why().empty());
+}
+
+TEST_F(Harness, SelectSiblingsTreeAndType) {
+    const core::NodeRef sequence{"Toy.xml", {0}};
+    session.setCursor(sequence.child(2));
+    frames(2);
+    press(ImGuiKey_A, ImGuiMod_Ctrl);
+    EXPECT_EQ(session.selection.size(), 5u); // the Sequence's children
+    press(ImGuiKey_A, ImGuiMod_Ctrl);
+    EXPECT_EQ(session.selection.size(), 8u); // every node of the tree
+    session.setCursor(sequence.child(3));
+    frames(2);
+    press(ImGuiKey_L, ImGuiMod_Ctrl | ImGuiMod_Shift);
+    EXPECT_EQ(session.selection, (std::vector<core::NodeRef>{sequence.child(3), sequence.child(5)}));
+    press(ImGuiKey_A, ImGuiMod_Ctrl | ImGuiMod_Shift);
+    EXPECT_EQ(session.selection, std::vector<core::NodeRef>{sequence.child(3)});
+
+    // Ctrl+arrows move the cursor and keep the selection; Ctrl+Space adds the node.
+    press(ImGuiKey_RightArrow, ImGuiMod_Ctrl);
+    EXPECT_EQ(cursorId(), "Fallback");
+    press(ImGuiKey_Space, ImGuiMod_Ctrl);
+    EXPECT_EQ(session.selection.size(), 2u);
+}
+
+// Every command's key is written down in docs/keys.md.
+TEST_F(Harness, KeysDocListsEveryShortcut) {
+    std::ifstream file(NOTGROOT_KEYS_DOC);
+    ASSERT_TRUE(file) << NOTGROOT_KEYS_DOC;
+    const std::string doc((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    for (const auto &command : session.commands) {
+        if (command.chord) {
+            EXPECT_NE(doc.find(ui::chordName(command.chord)), std::string::npos)
+                << command.id << " (" << ui::chordName(command.chord) << ") is missing from docs/keys.md";
+        }
+    }
 }

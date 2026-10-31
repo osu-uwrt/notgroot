@@ -49,6 +49,9 @@ struct Command {
     bool canvasOnly = false; // only while the canvas has focus (keys that mean text elsewhere)
     std::function<void()> run;
     std::function<bool()> enabled; // null: always
+    // Whether it means anything for the cursor's node (the node menu and the command finder leave it out otherwise).
+    std::function<bool()> applies = nullptr;    // null: always
+    std::function<std::string()> why = nullptr; // why it is disabled (tooltip, status line); null: nothing to say
 };
 
 // The node picker (Tab, Shift+Tab, Ctrl+W, Ctrl+R, the palette): what the picked model is for.
@@ -89,6 +92,8 @@ class Session {
     }
     void toggleSelected(const core::NodeRef &);
     bool selected(const core::NodeRef &) const;
+    // Every node of the active tree, in document order (the root's descendants).
+    std::vector<core::NodeRef> allNodes() const;
     // The nodes an edit applies to: the selection, else the cursor (when it is editable).
     std::vector<core::NodeRef> targets() const;
     // Opens the node's tree and puts the cursor on it.
@@ -128,8 +133,9 @@ class Session {
     } picker;
     void pick(PickFor);
     bool showFinder = false;
-    std::string finderPrefix; // "" anything, ">" commands, "@" nodes here, "$" keys here
-    bool showSearch = false;  // Ctrl+F in the canvas
+    std::string finderPrefix;   // "" anything, ">" commands, "@" nodes here, "$" keys here
+    bool showSearch = false;    // Ctrl+F in the canvas
+    bool showShortcuts = false; // the keyboard guide (F1)
     std::string search;
     struct Dialog {
         enum Kind { None, NewSubtree, NewMission, RenameTree, RenameKey, ExtractSubtree, EditPorts, Unsaved };
@@ -150,6 +156,12 @@ class Session {
     std::vector<Command> commands;
     const Command *command(const std::string &id) const;
     void run(const std::string &id);
+    static bool applies(const Command &c) {
+        return !c.applies || c.applies();
+    }
+    static bool enabled(const Command &c) {
+        return !c.enabled || c.enabled();
+    }
     bool canvasFocused = false;   // the canvas window has keyboard focus this frame
     bool canvasHeld = false;      // it had it at the end of the last frame
     std::function<void()> quit;   // set by the host

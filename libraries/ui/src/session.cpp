@@ -296,8 +296,28 @@ const Command *Session::command(const std::string &id) const {
 }
 
 void Session::run(const std::string &id) {
-    if (const auto *c = command(id); c && (!c->enabled || c->enabled()))
+    const auto *c = command(id);
+    if (c && enabled(*c))
         c->run();
+    else if (c && c->why)
+        status(c->why(), true);
+}
+
+std::vector<NodeRef> Session::allNodes() const {
+    std::vector<NodeRef> all;
+    const auto *entry = workspace.tree(active);
+    if (!entry)
+        return all;
+    const std::function<void(const Element &, const NodeRef &)> visit = [&](const Element &element,
+                                                                            const NodeRef &ref) {
+        for (std::size_t i = 0; i < element.children.size(); ++i)
+            if (!element.children[i]->isComment()) {
+                all.push_back(ref.child(i));
+                visit(*element.children[i], ref.child(i));
+            }
+    };
+    visit(*entry->tree, {active, {}});
+    return all;
 }
 
 bool Session::model(const std::string &id, NodeModel &out) const {
@@ -364,6 +384,30 @@ void Session::registerCommands() {
     const auto onTree = [this] { return workspace.isOpen() && !active.empty(); };
     const auto onNode = [this] { return !targets().empty(); };
     const auto add = [this](Command c) { commands.push_back(std::move(c)); };
+    // What the node menu and the finder offer depends on the cursor's node.
+    const auto at = [this]() -> Element * { return cursor.ref.empty() ? nullptr : resolve(workspace, cursor.ref); };
+    const auto onEditable = [this] { return !cursor.ref.empty() && !cursor.ref.isTree() && !cursor.readOnly(); };
+    const auto onCall = [at] {
+        const auto *element = at();
+        return element && isSubTree(*element);
+    };
+    const auto onSubtree = [this] {
+        const auto *entry = workspace.tree(active);
+        return entry && entry->id == active;
+    };
+    const auto takesChildren = [this, at] {
+        const auto *element = at();
+        return !cursor.readOnly() && element &&
+               (cursor.ref.isTree() || maxChildren(nodeCategory(*element, workspace.catalog())) != 0);
+    };
+    // Wrap and extract take nodes under one parent.
+    const auto siblings = [this] {
+        const auto refs = targets();
+        return !refs.empty() && std::all_of(refs.begin(), refs.end(), [&](auto &r) {
+            return !r.isTree() && r.parent() == refs.front().parent();
+        });
+    };
+    const auto notSiblings = [] { return std::string("Select nodes under one parent"); };
 
     // File
     add({"file.open", "Open trees folder or file…", "File", ImGuiMod_Ctrl | ImGuiKey_O, false,
@@ -406,13 +450,13 @@ void Session::registerCommands() {
              ImGui::SetClipboardText(text.c_str());
              status("Copied");
          },
-         [this] { return !targets().empty() || cursor.readOnly(); }});
+         [this] { return !targets().empty() || cursor.readOnly(); }, [this] { return !cursor.ref.isTree(); }});
     add({"edit.cut", "Cut nodes", "Edit", ImGuiMod_Ctrl | ImGuiKey_X, true,
          [this] {
              ImGui::SetClipboardText(copyNodes(workspace, targets()).c_str());
              edited(editor.remove(targets()));
          },
-         onNode});
+         onNode, onEditable});
     add({"edit.paste", "Paste nodes (into the cursor, else after it)", "Edit", ImGuiMod_Ctrl | ImGuiKey_V, true,
          [this] {
              const char *clip = ImGui::GetClipboardText();
@@ -431,7 +475,11 @@ void Session::registerCommands() {
                  edited(editor.insertMany(cursor.ref.parent(), index + 1, std::move(nodes), "Paste"));
              }
          },
-         [this, onTree] { return onTree() && !cursor.readOnly(); }});
+         [this, onTree] {
+             const char *clip = ImGui::GetClipboardText();
+             return onTree() && !cursor.readOnly() && !parseClipboard(clip ? clip : "").empty();
+         },
+         [this] { return !cursor.readOnly(); }, [] { return std::string("The clipboard holds no tree nodes"); }});
     add({"edit.duplicate", "Duplicate nodes", "Edit", ImGuiMod_Ctrl | ImGuiKey_D, true,
          [this] {
              const auto refs = targets();
@@ -443,19 +491,74 @@ void Session::registerCommands() {
              const auto index = std::size_t(std::find(siblings.begin(), siblings.end(), last) - siblings.begin());
              edited(editor.insertMany(refs.back().parent(), index + 1, std::move(nodes), "Duplicate"));
          },
-         onNode});
+         onNode, onEditable});
     add({"edit.delete", "Delete nodes", "Edit", ImGuiKey_Delete, true, [this] { edited(editor.remove(targets())); },
-         onNode});
+         onNode, onEditable});
+
+    // Select
+    add({"select.siblings", "Select the siblings (again: the whole tree)", "Select", ImGuiMod_Ctrl | ImGuiKey_A, true,
+         [this] {
+             std::vector<NodeRef> group;
+             if (!cursor.ref.isTree() && !cursor.readOnly())
+                 if (const auto *element = resolve(workspace, cursor.ref))
+                     for (std::size_t i = 0; i < element->parent->children.size(); ++i)
+                         if (!element->parent->children[i]->isComment())
+                             group.push_back(cursor.ref.parent().child(i));
+             auto now = selection;
+             std::sort(now.begin(), now.end());
+             if (group.empty() || now == group)
+                 group = allNodes();
+             selection = group;
+             status(std::to_string(selection.size()) + " nodes selected");
+         },
+         onTree});
+    add({"select.below", "Select the node and everything under it", "Select",
+         ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_A, true,
+         [this] {
+             selection.clear();
+             for (const auto &ref : allNodes())
+                 if (ref == cursor.ref || isAncestor(cursor.ref, ref))
+                     selection.push_back(ref);
+             status(std::to_string(selection.size()) + " nodes selected");
+         },
+         [this] { return !cursor.readOnly() && !cursor.ref.empty(); }});
+    add({"select.sameType", "Select every node of this type", "Select", ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_L,
+         true,
+         [this, at] {
+             const auto *element = at();
+             if (!element)
+                 return;
+             const auto type = isSubTree(*element) ? "SubTree:" + element->get("ID") : nodeId(*element);
+             selection.clear();
+             for (const auto &ref : allNodes()) {
+                 const auto *other = resolve(workspace, ref);
+                 if ((isSubTree(*other) ? "SubTree:" + other->get("ID") : nodeId(*other)) == type)
+                     selection.push_back(ref);
+             }
+             status(std::to_string(selection.size()) + " " + type + " selected");
+         },
+         onEditable, onEditable});
+    add({"select.toggle", "Add the node to the selection, or take it out", "Select", ImGuiMod_Ctrl | ImGuiKey_Space,
+         true, [this] { toggleSelected(cursor.ref); }, onEditable, onEditable});
+    add({"select.none", "Clear the selection", "Select", 0, false,
+         [this] {
+             selection.clear();
+             highlightKey.clear();
+         },
+         [this] { return !selection.empty(); }});
 
     // Node
-    add({"node.child", "Add child…", "Node", ImGuiKey_Tab, true, [this] { pick(PickFor::Child); }, onTree});
+    add({"node.child", "Add child…", "Node", ImGuiKey_Tab, true, [this] { pick(PickFor::Child); }, onTree,
+         takesChildren});
     add({"node.sibling", "Add sibling after…", "Node", ImGuiMod_Shift | ImGuiKey_Tab, true,
-         [this] { pick(PickFor::Sibling); }, onNode});
-    add({"node.wrap", "Wrap in…", "Node", ImGuiMod_Ctrl | ImGuiKey_W, true, [this] { pick(PickFor::Wrap); }, onNode});
+         [this] { pick(PickFor::Sibling); }, onNode, onEditable});
+    add({"node.wrap", "Wrap in…", "Node", ImGuiMod_Ctrl | ImGuiKey_W, true, [this] { pick(PickFor::Wrap); }, siblings,
+         onEditable, notSiblings});
     add({"node.retype", "Change node type…", "Node", ImGuiMod_Ctrl | ImGuiKey_R, true,
-         [this] { pick(PickFor::Retype); }, onNode});
+         [this] { pick(PickFor::Retype); }, onNode, onEditable});
     add({"node.unwrap", "Unwrap (keep the children)", "Node", ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_W, true,
-         [this] { edited(editor.unwrap(cursor.ref)); }, onNode});
+         [this] { edited(editor.unwrap(cursor.ref)); }, onNode,
+         [onEditable, at] { return onEditable() && !at()->elements().empty(); }});
     add({"node.earlier", "Move earlier among siblings", "Node", 0, false,
          [this] { edited(editor.move(cursor.ref, -1)); }, onNode});
     add({"node.later", "Move later among siblings", "Node", 0, false, [this] { edited(editor.move(cursor.ref, 1)); },
@@ -480,7 +583,7 @@ void Session::registerCommands() {
              else
                  status("Not a subtree call", true);
          },
-         onTree});
+         onTree, [this, onCall] { return onCall() || cursor.readOnly(); }});
 
     // Tree
     add({"tree.newSubtree", "New subtree…", "Tree", ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N, false,
@@ -488,7 +591,7 @@ void Session::registerCommands() {
     add({"tree.newMission", "New mission…", "Tree", 0, false, [this] { ask(Dialog::NewMission); }, open});
     add({"tree.rename", "Rename tree…", "Tree", 0, false, [this] { ask(Dialog::RenameTree, active, active); }, onTree});
     add({"tree.extract", "Extract selection to a new subtree…", "Tree", ImGuiMod_Ctrl | ImGuiKey_E, true,
-         [this] { ask(Dialog::ExtractSubtree); }, onNode});
+         [this] { ask(Dialog::ExtractSubtree); }, siblings, onEditable, notSiblings});
     add({"tree.ports", "Edit subtree ports…", "Tree", ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_E, false,
          [this] {
              auto *element = resolve(workspace, cursor.ref);
@@ -500,7 +603,7 @@ void Session::registerCommands() {
              }
              ask(Dialog::EditPorts, id);
          },
-         onTree});
+         onTree, [onCall, onSubtree] { return onCall() || onSubtree(); }});
     add({"tree.delete", "Delete tree", "Tree", 0, false,
          [this] {
              const auto key = active;
@@ -588,6 +691,8 @@ void Session::registerCommands() {
                  openTree(*(found + 1 == tabs.end() ? tabs.begin() : found + 1));
          },
          onTree});
+    add({"help.keys", "Keyboard shortcuts", "Help", ImGuiKey_F1, false, [this] { showShortcuts = !showShortcuts; },
+         nullptr});
     add({"view.previousTab", "Previous tree tab", "View", ImGuiMod_Ctrl | ImGuiKey_PageUp, false,
          [this] {
              const auto found = std::find(tabs.begin(), tabs.end(), active);

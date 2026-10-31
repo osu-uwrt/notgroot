@@ -21,6 +21,10 @@ void drawProblems(Session &);
 void drawFinder(Session &);
 void drawPicker(Session &);
 void drawDialogs(Session &);
+// The keyboard guide (F1): every command with its key, and the canvas's own keys; searchable.
+void drawShortcuts(Session &);
+// The canvas's keys that are not commands (moving, folding, selecting), as {keys, what they do}.
+const std::vector<std::pair<const char *, const char *>> &canvasKeys();
 // Runs the commands whose shortcut was pressed this frame.
 void handleShortcuts(Session &);
 } // namespace notgroot::ui

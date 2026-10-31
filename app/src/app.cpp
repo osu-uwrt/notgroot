@@ -377,6 +377,7 @@ void App::frame() {
     ui::drawFinder(session_);
     ui::drawPicker(session_);
     ui::drawDialogs(session_);
+    ui::drawShortcuts(session_);
     aboutWindow();
     ui::handleShortcuts(session_);
     updateTitle();
@@ -487,7 +488,7 @@ void App::menuBar() {
         }
         ImGui::EndMenu();
     }
-    for (const char *group : {"Edit", "Node", "Tree"})
+    for (const char *group : {"Edit", "Select", "Node", "Tree"})
         if (ImGui::BeginMenu(group)) {
             commands(group);
             ImGui::EndMenu();
@@ -529,6 +530,7 @@ void App::menuBar() {
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Help")) {
+        commands("Help");
         if (ImGui::MenuItem("About notgroot"))
             showAbout_ = true;
         ImGui::EndMenu();

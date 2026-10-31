@@ -17,6 +17,7 @@ gtest_discover_tests(notgroot_core_tests)
 add_executable(notgroot_ui_tests ui_keyboard.cpp)
 target_link_libraries(notgroot_ui_tests PRIVATE notgroot_ui GTest::gtest_main)
 target_compile_definitions(notgroot_ui_tests PRIVATE NOTGROOT_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data"
-  NOTGROOT_BUILTIN_MODELS="${NOTGROOT_CONTENT_DIR}/builtin_models.xml")
+  NOTGROOT_BUILTIN_MODELS="${NOTGROOT_CONTENT_DIR}/builtin_models.xml"
+  NOTGROOT_KEYS_DOC="${PROJECT_SOURCE_DIR}/docs/keys.md")
 notgroot_project_options(notgroot_ui_tests)
 gtest_discover_tests(notgroot_ui_tests)

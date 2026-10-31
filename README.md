@@ -39,12 +39,17 @@ saving writes only the files you changed. Includes are recomputed on save, so yo
 
 ## The editor
 
-- **Canvas.** Layout is automatic: you never drag nodes around, and child order on screen is the order in the file.
+- **Canvas.** Layout is automatic, and child order on screen is the order in the file. Dragging a node (or the
+  selection) moves it in the tree: beside another node, or into it.
   - Cards are colored by kind, as in btstudio: action green, condition blue, control orange, decorator purple,
     subtree cyan, unknown gray, tree root red. A subtree can have its own color.
   - Subtree calls have a dashed border.
   - Each port shows IN / OUT / IO, and values that are `{keys}` are drawn in that key's own color everywhere.
-  - Space opens a subtree in place, read-only; Ctrl+Enter goes to its definition.
+  - Space, or the round button under a call, opens a subtree in place, read-only; double-click or Ctrl+Enter opens
+    it in its own tab.
+  - Selection: Ctrl/Shift+click, Shift+drag for a box, and keys for siblings, a whole branch or every node of one
+    type.
+  - Right-click shows only what applies to that node; what can't run right now is greyed, with the reason.
 - **Inspector.**
   - Edits a node's name and ports.
   - The `{}` button switches a value between text and a key.
@@ -76,7 +81,8 @@ saving writes only the files you changed. Includes are recomputed on save, so yo
 - **Disk.** A file changed on disk reloads by itself. If it also has unsaved edits, notgroot asks which version to
   keep.
 
-[docs/keys.md](docs/keys.md) lists every key. The status bar shows the main ones, and Ctrl+Shift+P lists every command.
+[docs/keys.md](docs/keys.md) lists every key and mouse action; F1 shows the same list in the editor. The status bar shows
+the main ones, and Ctrl+Shift+P lists every command.
 
 ## Layout of the code
 
