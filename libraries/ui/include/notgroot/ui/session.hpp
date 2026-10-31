@@ -19,10 +19,11 @@
 namespace notgroot::ui {
 // A card on the canvas: a node, or (for a subtree opened in place) a node of that subtree reached through a call.
 struct CardKey {
-    core::NodeRef ref;    // the node itself (in its own tree)
-    core::NodeRef origin; // the SubTree call it is shown under; empty for the tree's own nodes
+    core::NodeRef ref;                   // the node itself (in its own tree)
+    core::NodeRef origin;                // the SubTree call it is shown under; empty for the tree's own nodes
+    std::vector<core::NodeRef> via = {}; // calls opened inside that one on the way to it (each in its own tree)
     bool operator==(const CardKey &o) const {
-        return ref == o.ref && origin == o.origin;
+        return ref == o.ref && origin == o.origin && via == o.via;
     }
     bool operator!=(const CardKey &o) const {
         return !(*this == o);
@@ -37,10 +38,11 @@ struct ViewState {
     ImVec2 pan{0, 0};
     float zoom = 1;
     std::set<std::vector<std::size_t>> folded;
-    std::set<std::vector<std::size_t>> opened; // SubTree calls shown expanded
-    bool fit = true;                           // fit the tree to the view on the next frame
-    bool fitted = false;                       // still as fitted (no pan or zoom since): refit when the view resizes
-    ImVec2 size{0, 0};                         // the canvas size last frame
+    std::set<std::vector<std::size_t>> opened;         // SubTree calls shown expanded
+    std::set<std::vector<core::NodeRef>> openedInside; // calls inside an opened subtree: the calls leading to them
+    bool fit = true;                                   // fit the tree to the view on the next frame
+    bool fitted = false; // still as fitted (no pan or zoom since): refit when the view resizes
+    ImVec2 size{0, 0};   // the canvas size last frame
 };
 
 struct Command {

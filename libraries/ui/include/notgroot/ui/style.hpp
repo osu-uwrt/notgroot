@@ -8,8 +8,9 @@
 
 namespace notgroot::ui {
 bool darkTheme();
-// A node category's color (btstudio: action green, condition blue, control orange, decorator purple, subtree
-// cyan, unknown gray); `root` is the tree card's red.
+// A node category's color, the bar down a card's side: action slate, condition teal, control orange, decorator
+// purple, subtree taupe, unknown gray (clear of Groot's accents, which color the special nodes' titles); `root` is
+// the tree card's red.
 ImVec4 categoryColor(core::Category);
 ImVec4 rootColor();
 // A subtree's color: its own (notgroot:color metadata) if set, else the subtree category's.

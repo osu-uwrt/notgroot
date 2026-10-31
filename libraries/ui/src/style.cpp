@@ -52,10 +52,10 @@ ImVec4 categoryColor(core::Category category) {
     ImVec4 color;
     switch (category) {
     case core::Category::Action:
-        color = hex(0x4CAF50);
+        color = hex(0x90A4AE);
         break;
     case core::Category::Condition:
-        color = hex(0x2196F3);
+        color = hex(0x26A69A);
         break;
     case core::Category::Control:
         color = hex(0xFF9800);
@@ -64,7 +64,7 @@ ImVec4 categoryColor(core::Category category) {
         color = hex(0x9C27B0);
         break;
     case core::Category::SubTree:
-        color = hex(0x00BCD4);
+        color = hex(0xA1887F);
         break;
     case core::Category::Unknown:
         color = hex(0x757575);

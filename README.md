@@ -41,16 +41,15 @@ saving writes only the files you changed. Includes are recomputed on save, so yo
 
 - **Canvas.** Layout is automatic, and child order on screen is the order in the file. Dragging a node (or the
   selection) moves it in the tree: beside another node, or into it.
-  - Cards are tinted by kind, as in btstudio (action green, condition blue, control orange, decorator purple,
-    subtree cyan, unknown gray, tree root red), with a strip of that color down the left. A subtree can have its own
-    color.
-  - Nodes that change the flow stand out with Groot's colors and icons on their title and outline: Sequence pink,
-    Fallback blue (reactive ones deeper), Force/AlwaysSuccess green, Force/AlwaysFailure red, other decorators
-    (Inverter, Repeat, Retry, Timeout) and conditions in their own colors.
+  - Cards are plain, with a bar down the left for their kind: action slate, condition teal, control orange,
+    decorator purple, subtree taupe. A subtree can have its own color.
+  - Nodes that steer the flow have Groot's color and icon on their title: Sequence pink, Fallback blue (reactive
+    ones deeper), Force/AlwaysSuccess green, Force/AlwaysFailure red, other decorators (Inverter, Repeat, Retry,
+    Timeout) yellow, conditions green.
   - Subtree calls have a dashed border.
   - Each port shows IN / OUT / IO, and values that are `{keys}` are drawn in that key's own color everywhere.
-  - Space, or the round button under a call, opens a subtree in place, read-only; double-click or Ctrl+Enter opens
-    it in its own tab.
+  - Space, or the round button under a call, opens a subtree in place, grayed on a band of its color because it is
+    read-only there; calls inside it open the same way. Double-click or Ctrl+Enter opens it in its own tab.
   - Selection: Ctrl/Shift+click, Shift+drag for a box, and keys for siblings, a whole branch or every node of one
     type.
   - Right-click shows only what applies to that node; what can't run right now is greyed, with the reason.

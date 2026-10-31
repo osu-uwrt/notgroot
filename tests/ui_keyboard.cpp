@@ -253,3 +253,25 @@ TEST_F(Harness, KeysDocListsEveryShortcut) {
         }
     }
 }
+
+// A call inside a subtree opened in place opens too: Move's call to Settle, then Settle's own nodes.
+TEST_F(Harness, SubtreesOpenInsideOpenedSubtrees) {
+    session.setCursor(core::NodeRef{"Toy.xml", {0, 3}}); // SubTree Move
+    frames(2);
+    press(ImGuiKey_Space);
+    press(ImGuiKey_DownArrow);
+    EXPECT_EQ(cursorId(), "Sequence");
+    EXPECT_TRUE(session.cursor.readOnly());
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_RightArrow);
+    press(ImGuiKey_RightArrow);
+    ASSERT_EQ(session.cursor.ref, (core::NodeRef{"Move", {0, 2}})); // SubTree Settle, in Move
+    press(ImGuiKey_Space);
+    press(ImGuiKey_DownArrow);
+    EXPECT_EQ(cursorId(), "RetryUntilSuccessfulV3");
+    EXPECT_EQ(session.cursor.via, std::vector<core::NodeRef>{(core::NodeRef{"Move", {0, 2}})});
+    press(ImGuiKey_UpArrow);
+    press(ImGuiKey_Space); // closes Settle again
+    press(ImGuiKey_DownArrow);
+    EXPECT_NE(cursorId(), "RetryUntilSuccessfulV3");
+}

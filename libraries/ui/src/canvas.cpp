@@ -4,11 +4,13 @@
 #include "notgroot/ui/style.hpp"
 #include "notgroot/ui/theme.hpp"
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cfloat>
 #include <cmath>
 #include <functional>
 #include <imgui_internal.h>
+#include <map>
 
 namespace notgroot::ui {
 using namespace core;
@@ -67,6 +69,12 @@ Metrics metrics() {
     m.maxWidth = ui(380);
     m.header = m.title->FontSize + 2 * ui(5);
     return m;
+}
+
+// The gap between a parent's row and its children's. Edges turn in the half of it next to the children, so they
+// never cross a tall card on the parent's row.
+float levelGap(bool horizontal) {
+    return ui(horizontal ? 64 : 52);
 }
 
 float textWidth(ImFont *font, const std::string &text) {
@@ -162,6 +170,28 @@ void measure(Card &card, const Metrics &m) {
     card.size.y = height;
 }
 
+// A call inside an opened subtree, named by the calls that lead to it (the one in this tree first).
+std::vector<NodeRef> callChain(const CardKey &key) {
+    std::vector<NodeRef> chain{key.origin};
+    chain.insert(chain.end(), key.via.begin(), key.via.end());
+    chain.push_back(key.ref);
+    return chain;
+}
+
+bool isOpened(Session &session, const CardKey &key) {
+    auto &view = session.view(session.active);
+    return key.origin.empty() ? view.opened.count(key.ref.path) > 0 : view.openedInside.count(callChain(key)) > 0;
+}
+
+void toggleOpened(Session &session, const CardKey &key) {
+    auto &view = session.view(session.active);
+    if (key.origin.empty()) {
+        if (!view.opened.erase(key.ref.path))
+            view.opened.insert(key.ref.path);
+    } else if (!view.openedInside.erase(callChain(key)))
+        view.openedInside.insert(callChain(key));
+}
+
 void build(Session &session, Scene &scene, const Element &element, const CardKey &key, int parent, int depth,
            std::vector<std::string> &stack, const Metrics &m) {
     Card card;
@@ -184,7 +214,7 @@ void build(Session &session, Scene &scene, const Element &element, const CardKey
         describe(session, card, element);
     auto &view = session.view(session.active);
     card.folded = own && view.folded.count(key.ref.path) && !element.elements().empty();
-    card.opened = own && card.call && view.opened.count(key.ref.path);
+    card.opened = card.call && isOpened(session, key);
     if (card.folded)
         card.hidden = countNodes(element);
     measure(card, m);
@@ -195,22 +225,27 @@ void build(Session &session, Scene &scene, const Element &element, const CardKey
     if (card.folded)
         return;
 
-    // A subtree opened in place: its root's node under the call (read-only, one level).
+    // A subtree opened in place: its root's node under the call (read-only; calls in it open further).
     if (card.opened) {
         const auto id = element.get("ID");
         const auto *entry = session.workspace.tree(id);
         if (entry && std::find(stack.begin(), stack.end(), id) == stack.end()) {
             stack.push_back(id);
+            auto via = key.via;
+            if (!own)
+                via.push_back(key.ref);
             for (std::size_t i = 0; i < entry->tree->children.size(); ++i)
                 if (!entry->tree->children[i]->isComment())
-                    build(session, scene, *entry->tree->children[i], {{id, {i}}, key.ref}, index, depth + 1, stack, m);
+                    build(session, scene, *entry->tree->children[i], {{id, {i}}, own ? key.ref : key.origin, via},
+                          index, depth + 1, stack, m);
             stack.pop_back();
         }
         return;
     }
     for (std::size_t i = 0; i < element.children.size(); ++i)
         if (!element.children[i]->isComment())
-            build(session, scene, *element.children[i], {key.ref.child(i), key.origin}, index, depth + 1, stack, m);
+            build(session, scene, *element.children[i], {key.ref.child(i), key.origin, key.via}, index, depth + 1,
+                  stack, m);
 }
 
 std::size_t signature(Session &session) {
@@ -229,6 +264,14 @@ std::size_t signature(Session &session) {
     for (const auto &path : view.opened)
         for (const auto i : path)
             mix(i + 1), mix(11);
+    for (const auto &chain : view.openedInside) {
+        for (const auto &ref : chain) {
+            mix(std::hash<std::string>{}(ref.tree));
+            for (const auto i : ref.path)
+                mix(i + 1);
+        }
+        mix(17);
+    }
     return h;
 }
 
@@ -252,7 +295,7 @@ Scene &scene(Session &session) {
     options.horizontal = session.horizontal;
     options.siblingGap = ui(18);
     options.subtreeGap = ui(30);
-    options.levelGap = ui(session.horizontal ? 56 : 44);
+    options.levelGap = levelGap(session.horizontal);
     const auto rects = layoutTree(boxes, 0, options);
     float minX = FLT_MAX, minY = FLT_MAX, maxX = -FLT_MAX, maxY = -FLT_MAX;
     for (const auto &rect : rects) {
@@ -325,6 +368,50 @@ float drawnWidth(const View &view, const std::string &value) {
     return view.body->CalcTextSizeA(view.bodySize, FLT_MAX, 0, value.c_str()).x;
 }
 
+// Behind a subtree opened in place: a band in its color over its cards on each row (a tidy layout keeps them
+// together on a row, so other cards stay outside), named, so it reads as shown, not edited.
+void drawOpened(const Scene &scene, const View &view, ImDrawList *draw, bool horizontal) {
+    for (const auto &card : scene.cards) {
+        if (!card.opened || card.children.empty())
+            continue;
+        // Its cards' extent per row: along the row (lo, hi) and across it (top, bottom).
+        std::map<int, std::array<float, 4>> rows;
+        std::vector<int> open(card.children.begin(), card.children.end());
+        while (!open.empty()) {
+            const auto &inside = scene.cards[std::size_t(open.back())];
+            open.pop_back();
+            const float along = horizontal ? inside.position.y : inside.position.x;
+            const float across = horizontal ? inside.position.x : inside.position.y;
+            const float length = horizontal ? inside.size.y : inside.size.x;
+            const float depth = horizontal ? inside.size.x : inside.size.y;
+            auto [row, fresh] =
+                rows.try_emplace(inside.depth, std::array<float, 4>{along, along + length, across, across + depth});
+            if (!fresh)
+                row->second = {std::min(row->second[0], along), std::max(row->second[1], along + length),
+                               std::min(row->second[2], across), std::max(row->second[3], across + depth)};
+            open.insert(open.end(), inside.children.begin(), inside.children.end());
+        }
+        const float pad = ui(10), gap = levelGap(horizontal) / 2;
+        const ImVec4 color = !card.color.empty() ? subtreeColor(card.color) : categoryColor(Category::SubTree);
+        ImVec2 label{0, 0};
+        for (auto row = rows.begin(); row != rows.end(); ++row) {
+            const auto next = std::next(row);
+            // From half the gap above the row to half the gap above the next one, so the bands join up.
+            const float top = row->second[2] - gap,
+                        bottom = next != rows.end() ? next->second[2] - gap : row->second[3] + pad;
+            const ImVec2 a = horizontal ? view.at({top, row->second[0] - pad}) : view.at({row->second[0] - pad, top});
+            const ImVec2 b =
+                horizontal ? view.at({bottom, row->second[1] + pad}) : view.at({row->second[1] + pad, bottom});
+            draw->AddRectFilled(a, b, ImGui::GetColorU32(withAlpha(color, darkTheme() ? .07f : .1f)));
+            if (row == rows.begin())
+                label = a;
+        }
+        const std::string text = card.title + " - read-only (Ctrl+Enter to edit)";
+        notgroot::ui::text(draw, view.body, view.bodySize, {label.x + pad * view.zoom, label.y + ui(3) * view.zoom},
+                           ImGui::GetColorU32(withAlpha(palette().muted, .9f)), text.c_str());
+    }
+}
+
 void drawEdges(const Scene &scene, const View &view, ImDrawList *draw, bool horizontal) {
     const ImU32 color = ImGui::GetColorU32(withAlpha(palette().muted, .7f));
     const float thickness = std::max(1.f, ui(1.4f) * view.zoom);
@@ -342,12 +429,12 @@ void drawEdges(const Scene &scene, const View &view, ImDrawList *draw, bool hori
                                   : color;
             if (horizontal) {
                 const ImVec2 from{p1.x, (p0.y + p1.y) / 2}, to{c0.x, (c0.y + c1.y) / 2};
-                const float mid = (from.x + to.x) / 2;
+                const float mid = std::max(from.x, to.x - levelGap(true) * view.zoom / 2);
                 const ImVec2 points[] = {from, {mid, from.y}, {mid, to.y}, to};
                 draw->AddPolyline(points, 4, ink, 0, thickness);
             } else {
                 const ImVec2 from{(p0.x + p1.x) / 2, p1.y}, to{(c0.x + c1.x) / 2, c0.y};
-                const float mid = (from.y + to.y) / 2;
+                const float mid = std::max(from.y, to.y - levelGap(false) * view.zoom / 2);
                 const ImVec2 points[] = {from, {from.x, mid}, {to.x, mid}, to};
                 draw->AddPolyline(points, 4, ink, 0, thickness);
             }
@@ -362,29 +449,37 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
                  b = view.at({card.position.x + card.size.x, card.position.y + card.size.y});
     const float rounding = ui(5) * z;
     const auto &style = ImGui::GetStyle();
-    const float alpha = card.key.readOnly() ? .78f : 1.f;
+    // A subtree opened in place is grayed: it is shown, not edited here.
+    const bool readOnly = card.key.readOnly();
+    const float alpha = readOnly ? .55f : 1.f;
     const ImVec4 body = style.Colors[ImGuiCol_FrameBg];
     const ImVec4 band = !card.color.empty() ? subtreeColor(card.color)
                         : card.root         ? rootColor()
                                             : categoryColor(card.category);
-    // The category is a strip down the left and a tint in the header; the accent (Groot's colors) marks the
-    // nodes that change the flow, so they don't read as one more box.
-    const ImVec4 header = mix(body, band, darkTheme() ? .24f : .16f);
-    const ImVec4 bandInk = card.accent.colored ? readableOn(card.accent.color, header) : palette().text;
+    // Plain cards: the type is a bar down the side, and the nodes that steer the flow have Groot's color and icon
+    // on their title.
+    ImVec4 bandInk = card.accent.colored ? readableOn(card.accent.color, body) : palette().text;
+    if (readOnly)
+        bandInk = mix(bandInk, palette().muted, .6f);
     const bool keyed = std::any_of(card.rows.begin(), card.rows.end(), [&](const Row &row) {
         return row.value == "{" + session.highlightKey + "}" || mentions(row.value, session.highlightKey) ||
                rowWritesKey(row, session.highlightKey);
     });
 
-    // Shadow, body, header band.
-    draw->AddRectFilled({a.x + 2 * z, a.y + 3 * z}, {b.x + 2 * z, b.y + 3 * z},
-                        ImGui::GetColorU32(ImVec4(0, 0, 0, darkTheme() ? .35f : .12f)), rounding);
-    draw->AddRectFilled(a, b, ImGui::GetColorU32(withAlpha(body, alpha)), rounding);
+    // Shadow, body, the rule under the title, the type bar (the tree's own card has none).
+    if (!readOnly)
+        draw->AddRectFilled({a.x + 2 * z, a.y + 3 * z}, {b.x + 2 * z, b.y + 3 * z},
+                            ImGui::GetColorU32(ImVec4(0, 0, 0, darkTheme() ? .35f : .12f)), rounding);
+    draw->AddRectFilled(a, b, ImGui::GetColorU32(readOnly ? mix(body, style.Colors[ImGuiCol_WindowBg], .5f) : body),
+                        rounding);
     const float headerHeight = (m.header + (card.subtitle.empty() ? 0 : m.body->FontSize + m.rowGap)) * z;
-    draw->AddRectFilled(a, {b.x, a.y + headerHeight}, ImGui::GetColorU32(withAlpha(header, alpha)), rounding,
-                        card.rows.empty() ? ImDrawFlags_RoundCornersAll : ImDrawFlags_RoundCornersTop);
-    draw->AddRectFilled(a, {a.x + std::max(2.f, ui(4) * z), b.y}, ImGui::GetColorU32(withAlpha(band, alpha)), rounding,
-                        ImDrawFlags_RoundCornersLeft);
+    if (!card.rows.empty())
+        draw->AddLine({a.x, std::round(a.y + headerHeight)}, {b.x, std::round(a.y + headerHeight)},
+                      ImGui::GetColorU32(withAlpha(style.Colors[ImGuiCol_Border], alpha)), std::max(1.f, z * .8f));
+    if (!card.root || !card.color.empty())
+        draw->AddRectFilled(a, {a.x + std::max(2.f, ui(3) * z), b.y},
+                            ImGui::GetColorU32(readOnly ? withAlpha(palette().muted, .5f) : band), rounding,
+                            ImDrawFlags_RoundCornersLeft);
 
     // Icon, title, name, comment marker.
     float y = a.y + ui(5) * z;
@@ -441,9 +536,6 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
     const ImU32 edge = ImGui::GetColorU32(withAlpha(band, .9f * alpha));
     if (card.call)
         dashedRect(draw, a, b, edge, std::max(1.f, ui(1.5f) * z), ui(5) * z);
-    else if (card.accent.colored)
-        draw->AddRect(a, b, ImGui::GetColorU32(withAlpha(readableOn(card.accent.color, body), .85f * alpha)), rounding,
-                      0, std::max(1.5f, ui(2) * z));
     else
         draw->AddRect(a, b, ImGui::GetColorU32(withAlpha(style.Colors[ImGuiCol_Border], alpha)), rounding, 0,
                       std::max(1.f, z));
@@ -477,7 +569,7 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
 
 // The round button under a SubTree call that opens it in place (beside it in the left-right layout).
 bool caret(const Card &card, const View &view, bool horizontal, ImVec2 &centre, float &radius) {
-    if (!card.call || card.key.readOnly())
+    if (!card.call)
         return false;
     const ImVec2 a = view.at(card.position),
                  b = view.at({card.position.x + card.size.x, card.position.y + card.size.y});
@@ -608,13 +700,14 @@ void navigate(Session &session, const Scene &scene, int current) {
     }
 
     // Space folds a node, or opens a subtree call in place.
-    if (plain && ImGui::IsKeyPressed(ImGuiKey_Space) && !card.key.readOnly()) {
+    if (plain && ImGui::IsKeyPressed(ImGuiKey_Space) && (card.call || !card.key.readOnly())) {
         auto &view = session.view(session.active);
-        auto &set = card.call ? view.opened : view.folded;
-        if (set.count(card.key.ref.path))
-            set.erase(card.key.ref.path);
-        else if (card.call || !card.children.empty())
-            set.insert(card.key.ref.path);
+        if (card.call)
+            toggleOpened(session, card.key);
+        else if (view.folded.count(card.key.ref.path))
+            view.folded.erase(card.key.ref.path);
+        else if (!card.children.empty())
+            view.folded.insert(card.key.ref.path);
         session.revealPending = true;
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
@@ -820,7 +913,12 @@ void drawCanvas(Session &session) {
         CardKey up = session.cursor;
         while (cursorIndex < 0 && !up.ref.path.empty()) {
             up.ref.path.pop_back();
-            if (up.ref.path.empty() && !up.origin.empty())
+            if (up.ref.path.empty() && !up.via.empty()) {
+                auto via = up.via;
+                const auto call = via.back();
+                via.pop_back();
+                up = {call, up.origin, via};
+            } else if (up.ref.path.empty() && !up.origin.empty())
                 up = {up.origin, {}};
             cursorIndex = current.find(up);
         }
@@ -951,8 +1049,7 @@ void drawCanvas(Session &session) {
     const bool left = ImGui::IsItemClicked(ImGuiMouseButton_Left), right = ImGui::IsItemClicked(ImGuiMouseButton_Right);
     if (left && caretUnder >= 0) {
         const auto &card = current.cards[std::size_t(caretUnder)];
-        if (!view.opened.erase(card.key.ref.path))
-            view.opened.insert(card.key.ref.path);
+        toggleOpened(session, card.key);
         session.setCursor(card.key);
     } else if (left || right) {
         if (under >= 0) {
@@ -1081,6 +1178,7 @@ void drawCanvas(Session &session) {
             for (float y = std::fmod(view.pan.y, grid); y < size.y; y += grid)
                 draw->AddRectFilled({start.x + x, start.y + y}, {start.x + x + 1.5f, start.y + y + 1.5f}, dot);
     }
+    drawOpened(current, v, draw, session.horizontal);
     drawEdges(current, v, draw, session.horizontal);
     for (std::size_t i = 0; i < current.cards.size(); ++i) {
         const auto &card = current.cards[i];
