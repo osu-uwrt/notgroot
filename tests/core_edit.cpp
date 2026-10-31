@@ -183,6 +183,19 @@ TEST_F(Fixture, RenameSubtreeMovesItsFile) {
     EXPECT_FALSE(workspace.tree("Steady"));
 }
 
+TEST_F(Fixture, SubtreeColorIsAMetadataComment) {
+    EXPECT_EQ(treeColor(workspace, "Settle"), "");
+    ASSERT_TRUE(editor.setTreeColor("Settle", "#ff8800"));
+    EXPECT_EQ(treeColor(workspace, "Settle"), "#ff8800");
+    EXPECT_NE(text("Settle").find("    <!-- notgroot:color=#ff8800 -->\n    <BehaviorTree ID=\"Settle\">"),
+              std::string::npos);
+    ASSERT_TRUE(editor.setTreeColor("Settle", "#112233")); // replaced, not added
+    EXPECT_EQ(text("Settle").find("#ff8800"), std::string::npos);
+    EXPECT_TRUE(editor.setTreeColor("Settle", ""));
+    EXPECT_EQ(text("Settle").find("notgroot:"), std::string::npos);
+    EXPECT_FALSE(editor.setTreeColor("Settle", "orange"));
+}
+
 TEST_F(Fixture, DeleteTreeRefusesWhileCalled) {
     EXPECT_FALSE(editor.deleteTree("Settle"));
     EXPECT_NE(editor.error().find("called"), std::string::npos);

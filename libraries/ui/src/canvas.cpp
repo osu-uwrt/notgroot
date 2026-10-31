@@ -28,6 +28,7 @@ struct Card {
     Category category = Category::Unknown;
     bool root = false, call = false, opened = false, folded = false;
     std::string title, subtitle, comment;
+    std::string color; // a subtree's own color (#rrggbb), for its calls and its root card
     std::vector<Row> rows;
     int hidden = 0; // nodes folded away under it
     int parent = -1, depth = 0;
@@ -109,6 +110,8 @@ void describe(Session &session, Card &card, const Element &element) {
     card.title = id;
     card.subtitle = element.get("name");
     card.category = nodeCategory(element, catalog);
+    if (card.call)
+        card.color = treeColor(session.workspace, id);
     const NodeModel *model = catalog.find(id);
     if (model && !card.call && model->category == Category::SubTree)
         model = nullptr;
@@ -165,6 +168,8 @@ void build(Session &session, Scene &scene, const Element &element, const CardKey
         const auto *entry = session.workspace.tree(key.ref.tree);
         card.title = key.ref.tree;
         card.subtitle = entry && key.ref.tree != entry->id ? "mission" : "subtree";
+        if (entry && key.ref.tree == entry->id)
+            card.color = treeColor(session.workspace, entry->id);
         if (entry && key.ref.tree == entry->id)
             for (const auto &port : session.workspace.subtreeModel(entry->id).ports)
                 card.rows.push_back({port.name, "", port.direction, true, false, false});
@@ -327,8 +332,10 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
     const auto &style = ImGui::GetStyle();
     const float alpha = card.key.readOnly() ? .78f : 1.f;
     const ImVec4 body = style.Colors[ImGuiCol_FrameBg];
-    const ImVec4 band = card.root ? rootColor() : categoryColor(card.category);
-    const ImVec4 bandInk = card.root ? inkOn(band, {1, 1, 1, 1}, 3.f) : inkOnCategory(card.category);
+    const ImVec4 band = !card.color.empty() ? subtreeColor(card.color)
+                        : card.root         ? rootColor()
+                                            : categoryColor(card.category);
+    const ImVec4 bandInk = inkOn(band, {1, 1, 1, 1}, 3.f);
     const bool keyed = std::any_of(card.rows.begin(), card.rows.end(), [&](const Row &row) {
         return row.value == "{" + session.highlightKey + "}" || mentions(row.value, session.highlightKey) ||
                rowWritesKey(row, session.highlightKey);

@@ -64,6 +64,18 @@ ImVec4 rootColor() {
     return darkTheme() ? hex(0xF44336) : hex(0xD32F2F);
 }
 
+ImVec4 subtreeColor(const std::string &text) {
+    if (text.size() != 7 || text[0] != '#')
+        return categoryColor(core::Category::SubTree);
+    unsigned rgb = 0;
+    try {
+        rgb = unsigned(std::stoul(text.substr(1), nullptr, 16));
+    } catch (const std::exception &) {
+        return categoryColor(core::Category::SubTree);
+    }
+    return hex(rgb);
+}
+
 ImVec4 inkOnCategory(core::Category category) {
     return inkOn(categoryColor(category), {1, 1, 1, 1}, 3.f);
 }

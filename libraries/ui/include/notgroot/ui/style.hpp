@@ -11,6 +11,8 @@ bool darkTheme();
 // cyan, unknown gray); `root` is the tree card's red.
 ImVec4 categoryColor(core::Category);
 ImVec4 rootColor();
+// A subtree's color: its own (notgroot:color metadata) if set, else the subtree category's.
+ImVec4 subtreeColor(const std::string &hex);
 // Ink that reads on a category's fill.
 ImVec4 inkOnCategory(core::Category);
 // A blackboard key's color: hue from its name, lightness for the theme's paper.

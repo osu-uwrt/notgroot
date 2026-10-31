@@ -94,6 +94,10 @@ class Editor {
     bool setSubtreePorts(const std::string &id, const std::vector<PortModel> &ports,
                          const std::map<std::string, std::string> &renamed);
 
+    // A subtree's own color (contract section 6: <!-- notgroot:color=#rrggbb --> before its <BehaviorTree>); "" removes
+    // it.
+    bool setTreeColor(const std::string &key, const std::string &hex);
+
     // Where every subtree is called from.
     std::vector<NodeRef> callSites(const std::string &id) const;
 
@@ -107,6 +111,11 @@ class Editor {
     Workspace &workspace_;
     History &history_;
 };
+
+// Editor metadata kept in a comment right before an element: <!-- notgroot:key=value -->; "" if absent.
+std::string metadata(const Element &element, const std::string &key);
+// A tree's color from its metadata ("#rrggbb" or "").
+std::string treeColor(const Workspace &, const std::string &treeKey);
 
 // A tree ID or mission name is usable: letters, digits, _ and -, starting with a letter or _.
 bool validTreeId(const std::string &);

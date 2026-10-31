@@ -126,6 +126,55 @@ std::vector<std::unique_ptr<Element>> parseClipboard(const std::string &text) {
     return nodes;
 }
 
+namespace {
+// The comment holding notgroot:<key>= right before an element, if any.
+Element *metadataComment(const Element &element, const std::string &key) {
+    if (!element.parent)
+        return nullptr;
+    for (auto at = element.index(); at > 0 && element.parent->children[at - 1]->isComment(); --at) {
+        auto *comment = element.parent->children[at - 1].get();
+        if (comment->text.find("notgroot:" + key + "=") != std::string::npos)
+            return comment;
+    }
+    return nullptr;
+}
+} // namespace
+
+std::string metadata(const Element &element, const std::string &key) {
+    const auto *comment = metadataComment(element, key);
+    if (!comment)
+        return {};
+    const auto start = comment->text.find("notgroot:" + key + "=") + key.size() + 10;
+    const auto end = comment->text.find_first_of(" \t\n", start);
+    return comment->text.substr(start, end == std::string::npos ? std::string::npos : end - start);
+}
+
+std::string treeColor(const Workspace &workspace, const std::string &treeKey) {
+    const auto *entry = workspace.tree(treeKey);
+    return entry ? metadata(*entry->tree, "color") : std::string();
+}
+
+bool Editor::setTreeColor(const std::string &key, const std::string &hex) {
+    const auto *entry = workspace_.tree(key);
+    if (!entry)
+        return fail("no tree " + key);
+    if (!hex.empty() && (hex.size() != 7 || hex[0] != '#'))
+        return fail("a color is #rrggbb");
+    Change change(history_, hex.empty() ? "Default color" : "Color " + hex);
+    change.touch(*entry->document);
+    auto *comment = metadataComment(*entry->tree, "color");
+    if (hex.empty()) {
+        if (comment)
+            comment->detach();
+        return true;
+    }
+    if (comment)
+        comment->text = " notgroot:color=" + hex + " ";
+    else
+        entry->tree->parent->insert(entry->tree->index(), Element::comment(" notgroot:color=" + hex + " "));
+    return true;
+}
+
 bool validTreeId(const std::string &id) {
     if (id.empty() || !(std::isalpha(static_cast<unsigned char>(id[0])) || id[0] == '_'))
         return false;
