@@ -4,6 +4,7 @@
 #include "notgroot/ui/style.hpp"
 #include "notgroot/ui/theme.hpp"
 #include <algorithm>
+#include <cctype>
 
 namespace notgroot::ui {
 using namespace core;
@@ -124,7 +125,19 @@ void drawPalette(Session &session) {
         if (match.matched)
             shown.push_back({filter.empty() ? 0 : -match.score, *model});
     }
-    std::stable_sort(shown.begin(), shown.end(), [](auto &a, auto &b) { return a.first < b.first; });
+    // Best match first while filtering; else by type, then by name.
+    const auto lower = [](std::string text) {
+        for (auto &c : text)
+            c = char(std::tolower(static_cast<unsigned char>(c)));
+        return text;
+    };
+    std::stable_sort(shown.begin(), shown.end(), [&](auto &a, auto &b) {
+        if (!filter.empty())
+            return a.first < b.first;
+        if (a.second.category != b.second.category)
+            return a.second.category < b.second.category;
+        return lower(a.second.id) < lower(b.second.id);
+    });
 
     const auto add = [&](const NodeModel &model) {
         if (session.cursor.readOnly() || session.cursor.ref.empty()) {
@@ -142,7 +155,10 @@ void drawPalette(Session &session) {
         add(shown.front().second);
 
     ImGui::BeginChild("##palette_list");
-    for (const auto &[score, model] : shown) {
+    for (std::size_t i = 0; i < shown.size(); ++i) {
+        const auto &model = shown[i].second;
+        if (filter.empty() && (i == 0 || shown[i - 1].second.category != model.category))
+            sectionTitle(categoryName(model.category));
         chip(categoryColor(model.category));
         ImGui::PushID(model.id.c_str());
         if (ImGui::Selectable(model.id.c_str(), false, ImGuiSelectableFlags_AllowDoubleClick) &&
