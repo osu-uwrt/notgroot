@@ -105,6 +105,46 @@ TEST_F(Fixture, WrapUnwrapIndentOutdent) {
     EXPECT_EQ(nodeChildren(*resolve(workspace, group)).size(), 2u);
 }
 
+TEST_F(Fixture, RelocateMovesSelectionsInOneStep) {
+    const auto before = text("Toy.xml");
+    const auto seq = sequence();
+    const auto kids = nodeChildren(*resolve(workspace, seq));
+    const auto set = refOf(workspace, kids[0]), info = refOf(workspace, kids[1]);
+    const auto fallback = refOf(workspace, kids[3]);
+
+    // Into the Fallback, after its children; the comment above the setter goes along.
+    const auto moved = editor.relocate({info, set, set}, fallback, 2);
+    ASSERT_FALSE(moved.empty()) << editor.error();
+    const auto fallbackNow = refOf(workspace, nodeChildren(*resolve(workspace, seq))[1]);
+    EXPECT_EQ(ids(fallbackNow), (std::vector<std::string>{"CompareNums", "SubTree:Settle", "SetBlackboardV3", "Info"}));
+    EXPECT_EQ(ids(seq), (std::vector<std::string>{"SubTree:Move", "Fallback", "SubTree:Move"}));
+    EXPECT_TRUE(resolve(workspace, fallbackNow)->children[2]->isComment());
+    EXPECT_EQ(nodeId(*resolve(workspace, moved)), "SetBlackboardV3");
+    history.undo();
+    EXPECT_EQ(text("Toy.xml"), before);
+
+    // Reorder among siblings: the last call to the front.
+    const auto last = seq.child(resolve(workspace, seq)->children.size() - 1); // pointers die with undo
+    ASSERT_FALSE(editor.relocate({last}, seq, 0).empty()) << editor.error();
+    EXPECT_EQ(ids(seq).front(), "SubTree:Move");
+    EXPECT_EQ(ids(seq)[1], "SetBlackboardV3");
+    history.undo();
+
+    // Refused: into itself, into a leaf, nothing.
+    EXPECT_TRUE(editor.relocate({fallback}, fallback.child(0), 0).empty());
+    EXPECT_TRUE(editor.relocate({set}, info, 0).empty());
+    EXPECT_TRUE(editor.relocate({}, seq, 0).empty());
+    EXPECT_EQ(text("Toy.xml"), before);
+}
+
+TEST_F(Fixture, OutermostDropsNestedAndRepeats) {
+    const auto seq = sequence();
+    const auto fallback = refOf(workspace, nodeChildren(*resolve(workspace, seq))[3]);
+    const auto inner = refOf(workspace, nodeChildren(*resolve(workspace, fallback))[0]);
+    EXPECT_EQ(outermost({inner, fallback, fallback, {seq.tree, {}}}), std::vector<NodeRef>{fallback});
+    EXPECT_EQ(copyNodes(workspace, {inner, fallback}), copyNodes(workspace, {fallback}));
+}
+
 TEST_F(Fixture, RetypeKeepsChildrenAndSharedPorts) {
     const auto reactive = *workspace.catalog().find("ReactiveSequence");
     const auto made = editor.retype(sequence(), reactive);

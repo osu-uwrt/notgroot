@@ -93,7 +93,7 @@ bool acceptsChild(const Workspace &workspace, const Element &parent, bool adding
 
 std::string copyNodes(const Workspace &workspace, const std::vector<NodeRef> &refs) {
     std::string out;
-    for (const auto &ref : refs)
+    for (const auto &ref : outermost(refs))
         if (const auto *element = resolve(workspace, ref); element && !ref.isTree())
             writeElement(out, *element, 0);
     return out;
@@ -247,11 +247,23 @@ template <typename F> void forEachNode(Element &element, const F &visit) {
     }
 }
 
-bool isAncestor(const NodeRef &a, const NodeRef &b) { // a strictly above b
+} // namespace
+
+bool isAncestor(const NodeRef &a, const NodeRef &b) {
     return a.tree == b.tree && a.path.size() < b.path.size() &&
            std::equal(a.path.begin(), a.path.end(), b.path.begin());
 }
-} // namespace
+
+std::vector<NodeRef> outermost(std::vector<NodeRef> refs) {
+    refs.erase(std::remove_if(refs.begin(), refs.end(), [](auto &r) { return r.isTree() || r.empty(); }), refs.end());
+    std::sort(refs.begin(), refs.end());
+    refs.erase(std::unique(refs.begin(), refs.end()), refs.end());
+    std::vector<NodeRef> kept;
+    for (const auto &ref : refs)
+        if (std::none_of(refs.begin(), refs.end(), [&](auto &other) { return isAncestor(other, ref); }))
+            kept.push_back(ref);
+    return kept;
+}
 
 NodeRef Editor::insert(const NodeRef &parentRef, std::size_t nodeIndex, std::unique_ptr<Element> node,
                        const std::string &label) {
@@ -327,6 +339,60 @@ NodeRef Editor::move(const NodeRef &ref, int delta) {
     change.touch(*documentOf(workspace_, ref));
     auto block = detachBlock(*element);
     return refOf(workspace_, insertBlock(*parent, childIndexFor(*parent, to), std::move(block)));
+}
+
+NodeRef Editor::relocate(std::vector<NodeRef> refs, const NodeRef &parentRef, std::size_t nodeIndex) {
+    refs = outermost(refs);
+    auto *parent = resolve(workspace_, parentRef);
+    if (refs.empty() || !parent)
+        return fail("nothing to move"), NodeRef();
+    std::vector<Element *> moving;
+    int arriving = 0;
+    for (const auto &ref : refs) {
+        if (ref.tree != parentRef.tree)
+            return fail("nodes move within one tree (cut and paste them into another)"), NodeRef();
+        if (ref == parentRef || isAncestor(ref, parentRef))
+            return fail("a node cannot move into itself"), NodeRef();
+        auto *element = resolve(workspace_, ref);
+        if (!element)
+            return fail("nothing to move"), NodeRef();
+        moving.push_back(element);
+        arriving += element->parent != parent;
+    }
+    const auto siblings = nodeChildren(*parent);
+    const int count = int(siblings.size()) + arriving;
+    const int most = parent->tag == "BehaviorTree" ? 1 : maxChildren(nodeCategory(*parent, workspace_.catalog()));
+    if (most >= 0 && count > most)
+        return fail((parent->tag == "BehaviorTree" ? std::string("a tree") : nodeId(*parent)) + " cannot take " +
+                    (arriving > 1 ? "these children" : "another child")),
+               NodeRef();
+
+    // They go before the first node from nodeIndex on that stays put (or at the end).
+    Element *anchor = nullptr;
+    for (std::size_t i = nodeIndex; i < siblings.size() && !anchor; ++i)
+        if (std::find(moving.begin(), moving.end(), siblings[i]) == moving.end())
+            anchor = siblings[i];
+
+    Change change(history_, moving.size() == 1 ? "Move node" : "Move nodes");
+    change.touch(*documentOf(workspace_, parentRef));
+    std::vector<std::vector<std::unique_ptr<Element>>> blocks;
+    for (auto *element : moving)
+        blocks.push_back(detachBlock(*element));
+    std::size_t at = parent->children.size();
+    if (anchor) {
+        at = anchor->index();
+        while (at > 0 && parent->children[at - 1]->isComment())
+            --at;
+    }
+    Element *first = nullptr;
+    for (auto &block : blocks) {
+        const auto size = block.size();
+        auto *node = insertBlock(*parent, at, std::move(block));
+        at += size;
+        if (!first)
+            first = node;
+    }
+    return refOf(workspace_, first);
 }
 
 NodeRef Editor::indent(const NodeRef &ref) {

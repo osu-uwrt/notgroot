@@ -48,6 +48,11 @@ bool acceptsChild(const Workspace &, const Element &parent, bool adding = true);
 // Child elements that are nodes (no comments), and a node's position among them.
 std::vector<Element *> nodeChildren(const Element &);
 
+// The nodes of a selection that are not inside another selected node, in document order (no trees, no repeats).
+std::vector<NodeRef> outermost(std::vector<NodeRef>);
+// Whether a is strictly above b in one tree.
+bool isAncestor(const NodeRef &a, const NodeRef &b);
+
 // Clipboard text for nodes: their XML, one after another (pasteable here or into a text editor).
 std::string copyNodes(const Workspace &, const std::vector<NodeRef> &);
 // Parses clipboard text back into node elements (XML of one or more nodes); empty if it is not that.
@@ -74,6 +79,9 @@ class Editor {
     NodeRef outdent(const NodeRef &);         // out of its parent, right after it
     NodeRef wrap(const std::vector<NodeRef> &siblings, const NodeModel &with);
     NodeRef unwrap(const NodeRef &); // replaces a node by its children
+    // Moves nodes (the outermost of them, kept in document order, with their comments) under `parent`, before what
+    // is now its nodeIndex-th child; one tree only. Returns the first moved node.
+    NodeRef relocate(std::vector<NodeRef>, const NodeRef &parent, std::size_t nodeIndex);
     NodeRef retype(const NodeRef &, const NodeModel &to);
 
     bool setAttribute(const NodeRef &, const std::string &name, const std::string &value);
