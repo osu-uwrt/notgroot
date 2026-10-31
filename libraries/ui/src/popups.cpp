@@ -352,8 +352,10 @@ void drawPicker(Session &session) {
             // A new node with inputs: straight to its first one.
             if (!made.empty() && picker.purpose != PickFor::Wrap && picker.purpose != PickFor::Retype &&
                 std::any_of(model.ports.begin(), model.ports.end(),
-                            [](auto &p) { return p.direction != PortDirection::Output; }))
+                            [](auto &p) { return p.direction != PortDirection::Output; })) {
                 session.focusInspector = true;
+                session.focusCanvas = false;
+            }
         }
         if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !opening)
             close = true;

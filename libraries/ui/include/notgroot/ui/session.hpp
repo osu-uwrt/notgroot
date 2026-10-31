@@ -141,6 +141,7 @@ class Session {
     const Command *command(const std::string &id) const;
     void run(const std::string &id);
     bool canvasFocused = false;   // the canvas window has keyboard focus this frame
+    bool canvasHeld = false;      // it had it at the end of the last frame
     std::function<void()> quit;   // set by the host
     std::function<void()> browse; // File > Open: set by the host (a desktop dialog)
 

@@ -666,15 +666,19 @@ void drawCanvas(Session &session) {
     const ImVec2 start = ImGui::GetCursorScreenPos(), size = ImGui::GetContentRegionAvail();
     if (size.x < 10 || size.y < 10)
         return;
+    // Asked for until it holds over a whole frame: a window that appears later in a frame takes focus first.
     if (session.focusCanvas && !session.showSearch) {
-        ImGui::SetWindowFocus();
-        session.focusCanvas = false;
+        if (ImGui::IsWindowFocused() && session.canvasHeld)
+            session.focusCanvas = false;
+        else
+            ImGui::SetWindowFocus();
     }
     ImGui::InvisibleButton("##canvas", size,
                            ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle |
                                ImGuiButtonFlags_MouseButtonRight);
     const bool hovered = ImGui::IsItemHovered();
     session.canvasFocused = ImGui::IsWindowFocused() && !ImGui::GetIO().WantTextInput;
+    session.canvasHeld = session.canvasFocused;
     auto &io = ImGui::GetIO();
 
     // Fit or zoom. A fitted view refits as the canvas resizes (docking settles over the first frames).

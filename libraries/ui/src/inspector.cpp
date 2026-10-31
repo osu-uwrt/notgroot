@@ -248,8 +248,9 @@ void drawInspector(Session &session) {
     session.focusInspector = false;
     const std::string focusPort = session.focusPort;
     session.focusPort.clear();
+    // The first port takes the focus (Name only when asked for by name).
     const auto focusHere = [&](const std::string &name) {
-        const bool now = focusPort.empty() ? focusFirst : focusPort == name;
+        const bool now = focusPort.empty() ? focusFirst && name != "name" : focusPort == name;
         if (now)
             focusFirst = false;
         return now;

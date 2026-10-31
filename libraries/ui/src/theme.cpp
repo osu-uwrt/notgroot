@@ -1,7 +1,6 @@
 // Viewer themes: YAML theme loading, derivation of a full ImGui style from a few colors, the WCAG legibility
 // pass, and the shared section / table / surface helpers that draw in the active theme.
 #include "notgroot/ui/theme.hpp"
-#include <imgui_internal.h>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -11,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <imgui_internal.h>
 #include <map>
 #include <sstream>
 #include <yaml-cpp/yaml.h>
@@ -278,69 +278,68 @@ void only(const YAML::Node &node, std::initializer_list<const char *> allowed, c
 using SpecColor = ImVec4 Spec::*;
 using PaletteColor = ImVec4 Palette::*;
 const std::vector<std::pair<const char *, SpecColor>> &surfaceKeys() {
-    static const std::vector<std::pair<const char *, SpecColor>> keys{
-        {"window", &Spec::window},
-        {"child", &Spec::child},
-        {"popup", &Spec::popup},
-        {"frame", &Spec::frame},
-        {"frame_hovered", &Spec::frameHovered},
-        {"frame_active", &Spec::frameActive},
-        {"button", &Spec::button},
-        {"button_hovered", &Spec::buttonHovered},
-        {"button_pressed", &Spec::buttonPressed},
-        {"border", &Spec::border},
-        {"border_shadow", &Spec::borderShadow},
-        {"header", &Spec::header},
-        {"header_hovered", &Spec::headerHovered},
-        {"header_pressed", &Spec::headerPressed},
-        {"title", &Spec::title},
-        {"title_active", &Spec::titleActive},
-        {"tab", &Spec::tab},
-        {"tab_hovered", &Spec::tabHovered},
-        {"tab_selected", &Spec::tabSelected},
-        {"tab_dimmed", &Spec::tabDimmed},
-        {"tab_dimmed_selected", &Spec::tabDimmedSelected},
-        {"tab_overline", &Spec::tabOverline},
-        {"scroll_grab", &Spec::scrollGrab},
-        {"table_row_alt", &Spec::tableRowAlt}};
+    static const std::vector<std::pair<const char *, SpecColor>> keys{{"window", &Spec::window},
+                                                                      {"child", &Spec::child},
+                                                                      {"popup", &Spec::popup},
+                                                                      {"frame", &Spec::frame},
+                                                                      {"frame_hovered", &Spec::frameHovered},
+                                                                      {"frame_active", &Spec::frameActive},
+                                                                      {"button", &Spec::button},
+                                                                      {"button_hovered", &Spec::buttonHovered},
+                                                                      {"button_pressed", &Spec::buttonPressed},
+                                                                      {"border", &Spec::border},
+                                                                      {"border_shadow", &Spec::borderShadow},
+                                                                      {"header", &Spec::header},
+                                                                      {"header_hovered", &Spec::headerHovered},
+                                                                      {"header_pressed", &Spec::headerPressed},
+                                                                      {"title", &Spec::title},
+                                                                      {"title_active", &Spec::titleActive},
+                                                                      {"tab", &Spec::tab},
+                                                                      {"tab_hovered", &Spec::tabHovered},
+                                                                      {"tab_selected", &Spec::tabSelected},
+                                                                      {"tab_dimmed", &Spec::tabDimmed},
+                                                                      {"tab_dimmed_selected", &Spec::tabDimmedSelected},
+                                                                      {"tab_overline", &Spec::tabOverline},
+                                                                      {"scroll_grab", &Spec::scrollGrab},
+                                                                      {"table_row_alt", &Spec::tableRowAlt}};
     return keys;
 }
 
 const std::vector<std::pair<const char *, PaletteColor>> &paletteKeys() {
     static const std::vector<std::pair<const char *, PaletteColor>> keys{{"text", &Palette::text},
-                                                                          {"muted", &Palette::muted},
-                                                                          {"accent", &Palette::accent},
-                                                                          {"active", &Palette::active},
-                                                                          {"active_hovered", &Palette::activeHovered},
-                                                                          {"active_pressed", &Palette::activePressed},
-                                                                          {"active_text", &Palette::activeText},
-                                                                          {"danger", &Palette::danger},
-                                                                          {"danger_hovered", &Palette::dangerHovered},
-                                                                          {"danger_pressed", &Palette::dangerPressed},
-                                                                          {"danger_text", &Palette::dangerText},
-                                                                          {"warn", &Palette::warn},
-                                                                          {"error", &Palette::error},
-                                                                          {"robot_enabled", &Palette::robotEnabled},
-                                                                          {"robot_killed", &Palette::robotKilled},
-                                                                          {"bar", &Palette::bar},
-                                                                          {"toolbar", &Palette::toolbar},
-                                                                          {"change", &Palette::change},
-                                                                          {"change_text", &Palette::changeText},
-                                                                          {"enable", &Palette::enable},
-                                                                          {"enable_hovered", &Palette::enableHovered},
-                                                                          {"enable_pressed", &Palette::enablePressed},
-                                                                          {"enable_text", &Palette::enableText}};
+                                                                         {"muted", &Palette::muted},
+                                                                         {"accent", &Palette::accent},
+                                                                         {"active", &Palette::active},
+                                                                         {"active_hovered", &Palette::activeHovered},
+                                                                         {"active_pressed", &Palette::activePressed},
+                                                                         {"active_text", &Palette::activeText},
+                                                                         {"danger", &Palette::danger},
+                                                                         {"danger_hovered", &Palette::dangerHovered},
+                                                                         {"danger_pressed", &Palette::dangerPressed},
+                                                                         {"danger_text", &Palette::dangerText},
+                                                                         {"warn", &Palette::warn},
+                                                                         {"error", &Palette::error},
+                                                                         {"robot_enabled", &Palette::robotEnabled},
+                                                                         {"robot_killed", &Palette::robotKilled},
+                                                                         {"bar", &Palette::bar},
+                                                                         {"toolbar", &Palette::toolbar},
+                                                                         {"change", &Palette::change},
+                                                                         {"change_text", &Palette::changeText},
+                                                                         {"enable", &Palette::enable},
+                                                                         {"enable_hovered", &Palette::enableHovered},
+                                                                         {"enable_pressed", &Palette::enablePressed},
+                                                                         {"enable_text", &Palette::enableText}};
     return keys;
 }
 
 // Board-only colors; a board section may also override any palette key.
 const std::vector<std::pair<const char *, SpecColor>> &boardKeys() {
     static const std::vector<std::pair<const char *, SpecColor>> keys{{"button", &Spec::boardButton},
-                                                                       {"button_hovered", &Spec::boardButtonHovered},
-                                                                       {"button_pressed", &Spec::boardButtonPressed},
-                                                                       {"frame", &Spec::boardFrame},
-                                                                       {"popup", &Spec::boardPopup},
-                                                                       {"border", &Spec::boardBorder}};
+                                                                      {"button_hovered", &Spec::boardButtonHovered},
+                                                                      {"button_pressed", &Spec::boardButtonPressed},
+                                                                      {"frame", &Spec::boardFrame},
+                                                                      {"popup", &Spec::boardPopup},
+                                                                      {"border", &Spec::boardBorder}};
     return keys;
 }
 
