@@ -1,6 +1,7 @@
 // Node and key colors.
 #include "notgroot/ui/style.hpp"
 #include "notgroot/ui/theme.hpp"
+#include <algorithm>
 #include <cmath>
 
 namespace notgroot::ui {
@@ -14,6 +15,17 @@ float luminance(ImVec4 c) {
 }
 
 // FNV-1a: the same key gets the same hue in every session.
+std::vector<ImFont *> titleFonts, bodyFonts;
+
+std::size_t levelOf(float zoom) {
+    const auto &levels = zoomLevels();
+    std::size_t best = 0;
+    for (std::size_t i = 1; i < levels.size(); ++i)
+        if (std::abs(levels[i] - zoom) < std::abs(levels[best] - zoom))
+            best = i;
+    return best;
+}
+
 unsigned hash(const std::string &text) {
     unsigned h = 2166136261u;
     for (const char c : text)
@@ -116,6 +128,36 @@ const char *directionBadge(core::PortDirection direction) {
         break;
     }
     return "IN";
+}
+
+const std::vector<float> &zoomLevels() {
+    static const std::vector<float> levels{.3f, .4f, .5f, .6f, .7f, .8f, .9f, 1, 1.15f, 1.3f, 1.5f, 1.75f, 2, 2.5f};
+    return levels;
+}
+
+float nearestZoom(float zoom) {
+    return zoomLevels()[levelOf(zoom)];
+}
+
+float stepZoom(float zoom, int steps) {
+    const auto &levels = zoomLevels();
+    const long at = std::clamp(long(levelOf(zoom)) + steps, 0l, long(levels.size()) - 1);
+    return levels[std::size_t(at)];
+}
+
+void setCanvasFonts(std::vector<ImFont *> titles, std::vector<ImFont *> bodies) {
+    titleFonts = std::move(titles);
+    bodyFonts = std::move(bodies);
+}
+
+ImFont *canvasTitleFont(float zoom) {
+    const auto at = levelOf(zoom);
+    return at < titleFonts.size() ? titleFonts[at] : nullptr;
+}
+
+ImFont *canvasBodyFont(float zoom) {
+    const auto at = levelOf(zoom);
+    return at < bodyFonts.size() ? bodyFonts[at] : nullptr;
 }
 
 ImVec4 severityColor(int severity) {

@@ -30,18 +30,21 @@ find_package(OpenGL REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(PNG REQUIRED)
 find_package(Fontconfig REQUIRED)
+find_package(Freetype REQUIRED)
 
 # Content (themes, fonts, icons) is read from the source tree in a build and from share/notgroot once installed.
 set(NOTGROOT_CONTENT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/content)
 
 # Vendored Dear ImGui (docking branch; GLFW + OpenGL 3 backends) as a static library; SYSTEM includes keep -Werror
-# off its headers.
+# off its headers. Fonts are rasterized with FreeType (hinted, sharper than stb_truetype at small sizes).
 set(imgui ${PROJECT_SOURCE_DIR}/third_party/imgui)
 add_library(notgroot_imgui STATIC ${imgui}/imgui.cpp ${imgui}/imgui_draw.cpp
   ${imgui}/imgui_tables.cpp ${imgui}/imgui_widgets.cpp
-  ${imgui}/backends/imgui_impl_glfw.cpp ${imgui}/backends/imgui_impl_opengl3.cpp)
+  ${imgui}/backends/imgui_impl_glfw.cpp ${imgui}/backends/imgui_impl_opengl3.cpp
+  ${imgui}/misc/freetype/imgui_freetype.cpp)
 target_include_directories(notgroot_imgui SYSTEM PUBLIC ${imgui})
-target_link_libraries(notgroot_imgui PRIVATE glfw ${CMAKE_DL_LIBS})
+target_compile_definitions(notgroot_imgui PUBLIC IMGUI_ENABLE_FREETYPE)
+target_link_libraries(notgroot_imgui PRIVATE glfw Freetype::Freetype ${CMAKE_DL_LIBS})
 
 add_subdirectory(libraries/core)
 add_subdirectory(libraries/ui)

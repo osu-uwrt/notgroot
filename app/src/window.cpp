@@ -1,5 +1,6 @@
 // Window: GLFW window and GL 3.3 context, ImGui setup and fonts, frame presentation and PNG read / write.
 #include "window.hpp"
+#include "notgroot/ui/style.hpp"
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <algorithm>
@@ -9,6 +10,7 @@
 #include <cstdio>
 #include <fontconfig/fontconfig.h>
 #include <iostream>
+#include <misc/freetype/imgui_freetype.h>
 #include <png.h>
 #include <stdexcept>
 #include <strings.h>
@@ -129,16 +131,19 @@ void Window::loadFonts(float ui, const ui::Theme &theme, const std::filesystem::
             body = theme.fontPoints * 96.f / 72.f; // points to pixels at 96 dpi
     }
 
-    // Every size scales with the body size (k) and the interface scale. Fonts are rasterized at twice the size the
-    // canvas draws them at 100 % so zooming in stays sharp.
+    // Every size scales with the body size (k) and the interface scale. FreeType with light hinting keeps small text
+    // crisp; the canvas gets its card fonts again at every zoom step.
     const float k = body / 15;
     // Latin-1, general punctuation (dashes, ellipsis) and arrows
     static const ImWchar ranges[] = {0x0020, 0x00FF, 0x2010, 0x203A, 0x2190, 0x21FF, 0x25A0, 0x25FF, 0};
+    // ASCII, the ellipsis and the bullet: all the cards draw
+    static const ImWchar cardRanges[] = {0x0020, 0x007E, 0x2022, 0x2026, 0};
+    std::vector<ImFont *> cardTitles, cardBodies;
     if (std::filesystem::exists(font)) {
         ImFontConfig config;
-        config.OversampleH = 2;
-        const auto add = [&](const std::filesystem::path &file, float size) {
-            return io.Fonts->AddFontFromFileTTF(file.c_str(), size, &config, ranges);
+        config.FontBuilderFlags = ImGuiFreeTypeBuilderFlags_LightHinting;
+        const auto add = [&](const std::filesystem::path &file, float size, const ImWchar *glyphs = nullptr) {
+            return io.Fonts->AddFontFromFileTTF(file.c_str(), size, &config, glyphs ? glyphs : ranges);
         };
         normal = add(font, 15 * k * ui);
         const auto heavy = std::filesystem::exists(bold) ? bold : font;
@@ -147,8 +152,13 @@ void Window::loadFonts(float ui, const ui::Theme &theme, const std::filesystem::
         small = add(font, 12 * k * ui);
         title = add(figures.empty() ? heavy : figures, (figures.empty() ? 21 : 23) * k * ui);
         mono = std::filesystem::exists(monoFile) ? add(monoFile, 13 * k * ui) : normal;
+        for (const float zoom : ui::zoomLevels()) {
+            cardTitles.push_back(zoom == 1 ? strong : add(heavy, 15 * k * ui * zoom, cardRanges));
+            cardBodies.push_back(zoom == 1 ? small : add(font, 12 * k * ui * zoom, cardRanges));
+        }
     } else
         normal = small = title = strong = smallStrong = mono = io.Fonts->AddFontDefault();
+    ui::setCanvasFonts(cardTitles, cardBodies);
 
     io.FontDefault = normal;
     ui::setTypeRamp({strong, title, small, smallStrong});

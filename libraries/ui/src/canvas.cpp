@@ -288,10 +288,35 @@ bool rowWritesKey(const Row &row, const std::string &key) {
 struct View {
     ImVec2 origin; // screen position of canvas (0, 0)
     float zoom;
+    ImFont *title = nullptr, *body = nullptr; // the card fonts baked for this zoom
+    float titleSize = 0, bodySize = 0;
     ImVec2 at(ImVec2 p) const {
         return {origin.x + p.x * zoom, origin.y + p.y * zoom};
     }
 };
+
+View makeView(ImVec2 origin, float zoom, const Metrics &m) {
+    View v{origin, zoom};
+    v.title = canvasTitleFont(zoom);
+    v.body = canvasBodyFont(zoom);
+    // No baked font (ImGui's default): scale the 100 % one.
+    v.titleSize = v.title ? v.title->FontSize : m.title->FontSize * zoom;
+    v.bodySize = v.body ? v.body->FontSize : m.body->FontSize * zoom;
+    if (!v.title)
+        v.title = m.title;
+    if (!v.body)
+        v.body = m.body;
+    return v;
+}
+
+// Text on whole pixels, so the glyphs land on the texels they were rasterized to.
+void text(ImDrawList *draw, ImFont *font, float size, ImVec2 at, ImU32 color, const char *value) {
+    draw->AddText(font, size, {std::round(at.x), std::round(at.y)}, color, value);
+}
+
+float drawnWidth(const View &view, const std::string &value) {
+    return view.body->CalcTextSizeA(view.bodySize, FLT_MAX, 0, value.c_str()).x;
+}
 
 void drawEdges(const Scene &scene, const View &view, ImDrawList *draw, bool horizontal) {
     const ImU32 color = ImGui::GetColorU32(withAlpha(palette().muted, .7f));
@@ -352,16 +377,16 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
     // Title, name, comment marker.
     float y = a.y + ui(5) * z;
     const float x = a.x + m.pad * z;
-    draw->AddText(m.title, m.title->FontSize * z, {x, y}, ImGui::GetColorU32(bandInk), card.title.c_str());
+    text(draw, view.title, view.titleSize, {x, y}, ImGui::GetColorU32(bandInk), card.title.c_str());
     if (!card.comment.empty())
-        draw->AddText(m.body, m.body->FontSize * z,
-                      {b.x - (m.pad + textWidth(m.body, "//")) * z, y + (m.title->FontSize - m.body->FontSize) * z},
-                      ImGui::GetColorU32(withAlpha(bandInk, .75f)), "//");
+        text(draw, view.body, view.bodySize,
+             {b.x - m.pad * z - drawnWidth(view, "//"), y + (m.title->FontSize - m.body->FontSize) * z},
+             ImGui::GetColorU32(withAlpha(bandInk, .75f)), "//");
     y += m.title->FontSize * z;
     if (!card.subtitle.empty()) {
         y += m.rowGap * z;
-        draw->AddText(m.body, m.body->FontSize * z, {x, y}, ImGui::GetColorU32(withAlpha(bandInk, .85f)),
-                      card.subtitle.c_str());
+        text(draw, view.body, view.bodySize, {x, y}, ImGui::GetColorU32(withAlpha(bandInk, .85f)),
+             card.subtitle.c_str());
     }
 
     // Port rows: badge, name, value (a key in its own color).
@@ -376,20 +401,19 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
         const ImVec4 badgeInk = row.special    ? palette().muted
                                 : row.modelled ? directionColor(row.direction)
                                                : palette().error;
-        draw->AddText(m.body, line, {x, y}, ImGui::GetColorU32(withAlpha(badgeInk, alpha)),
-                      row.special ? "IF" : (!row.modelled ? "??" : directionBadge(row.direction)));
-        draw->AddText(
-            m.body, line, {x + badgeWidth, y},
-            ImGui::GetColorU32(withAlpha(row.missing ? withAlpha(palette().muted, .6f) : palette().muted, alpha)),
-            row.port.c_str());
+        text(draw, view.body, view.bodySize, {x, y}, ImGui::GetColorU32(withAlpha(badgeInk, alpha)),
+             row.special ? "IF" : (!row.modelled ? "??" : directionBadge(row.direction)));
+        text(draw, view.body, view.bodySize, {x + badgeWidth, y},
+             ImGui::GetColorU32(withAlpha(row.missing ? withAlpha(palette().muted, .6f) : palette().muted, alpha)),
+             row.port.c_str());
         const std::string &value = row.value;
-        const float valueX = b.x - m.pad * z - textWidth(m.body, value) * z;
+        const float valueX = b.x - m.pad * z - drawnWidth(view, value);
         ImVec4 ink = palette().text;
         if (isKeyReference(value))
             ink = keyColor(keyOf(value));
         else if (row.missing)
             ink = withAlpha(palette().muted, .6f);
-        draw->AddText(m.body, line, {valueX, y}, ImGui::GetColorU32(withAlpha(ink, alpha)), value.c_str());
+        text(draw, view.body, view.bodySize, {valueX, y}, ImGui::GetColorU32(withAlpha(ink, alpha)), value.c_str());
         y += line + m.rowGap * z;
     }
 
@@ -417,14 +441,14 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
 
     // Folded: how much is hidden. Opened call: a marker.
     if (card.folded) {
-        char text[32];
-        std::snprintf(text, sizeof(text), "+%d", card.hidden);
-        const float w = (textWidth(m.body, text) + m.pad) * z, h = (m.body->FontSize + ui(4)) * z;
+        char label[32];
+        std::snprintf(label, sizeof(label), "+%d", card.hidden);
+        const float w = (textWidth(m.body, label) + m.pad) * z, h = (m.body->FontSize + ui(4)) * z;
         const ImVec2 at = session.horizontal ? ImVec2(b.x + ui(6) * z, (a.y + b.y) / 2 - h / 2)
                                              : ImVec2((a.x + b.x) / 2 - w / 2, b.y + ui(6) * z);
         draw->AddRectFilled(at, {at.x + w, at.y + h}, ImGui::GetColorU32(style.Colors[ImGuiCol_Button]), h / 2);
-        draw->AddText(m.body, m.body->FontSize * z, {at.x + m.pad * z / 2, at.y + ui(2) * z},
-                      ImGui::GetColorU32(palette().muted), text);
+        text(draw, view.body, view.bodySize, {at.x + m.pad * z / 2, at.y + ui(2) * z}, ImGui::GetColorU32(palette().muted),
+             label);
     }
 }
 
@@ -692,11 +716,16 @@ void drawCanvas(Session &session) {
     if (view.fitted && (std::abs(view.size.x - size.x) > 1 || std::abs(view.size.y - size.y) > 1))
         view.fit = true;
     view.size = size;
+    view.zoom = nearestZoom(view.zoom);
     if (view.fit && current.extent.x > 0) {
-        // Small enough to see whole, but never below a readable size: a wide tree then starts at its root.
+        // The largest step that shows it whole, but never below a readable size: a wide tree then starts at its root.
         const float margin = ui(40);
-        view.zoom = std::clamp(
-            std::min((size.x - 2 * margin) / current.extent.x, (size.y - 2 * margin) / current.extent.y), .7f, 1.f);
+        const float whole =
+            std::min((size.x - 2 * margin) / current.extent.x, (size.y - 2 * margin) / current.extent.y);
+        view.zoom = .7f;
+        for (const float level : zoomLevels())
+            if (level > view.zoom && level <= std::min(whole, 1.f))
+                view.zoom = level;
         const auto &root = current.cards.front();
         view.pan = {(size.x - current.extent.x * view.zoom) / 2, margin};
         if (current.extent.x * view.zoom > size.x - 2 * margin)
@@ -708,13 +737,20 @@ void drawCanvas(Session &session) {
     }
     if (hovered && (io.MouseWheel != 0 || io.MouseWheelH != 0))
         view.fitted = false;
-    if (hovered && io.MouseWheel != 0 && io.KeyCtrl) {
+    // Zoom moves a step per wheel notch (touchpads send fractions: they add up to one).
+    static float wheel = 0;
+    if (hovered && io.MouseWheel != 0 && io.KeyCtrl)
+        wheel += io.MouseWheel;
+    else if (!hovered || !io.KeyCtrl)
+        wheel = 0;
+    if (std::abs(wheel) >= 1) {
         const float before = view.zoom;
-        view.zoom = std::clamp(view.zoom * std::pow(1.15f, io.MouseWheel), .2f, 2.5f);
+        view.zoom = stepZoom(view.zoom, wheel > 0 ? 1 : -1);
+        wheel -= wheel > 0 ? 1 : -1;
         const ImVec2 mouse{io.MousePos.x - start.x, io.MousePos.y - start.y};
         view.pan.x = mouse.x - (mouse.x - view.pan.x) * view.zoom / before;
         view.pan.y = mouse.y - (mouse.y - view.pan.y) * view.zoom / before;
-    } else if (hovered && (io.MouseWheel != 0 || io.MouseWheelH != 0)) {
+    } else if (hovered && !io.KeyCtrl && (io.MouseWheel != 0 || io.MouseWheelH != 0)) {
         const float step = ui(60);
         if (io.KeyShift)
             view.pan.x += io.MouseWheel * step;
@@ -724,20 +760,21 @@ void drawCanvas(Session &session) {
         }
     }
     if (session.canvasFocused && io.KeyCtrl && !io.KeyShift) {
-        const auto zoomBy = [&](float factor) {
+        const auto zoomBy = [&](int steps) {
             view.fitted = false;
             const float before = view.zoom;
-            view.zoom = std::clamp(view.zoom * factor, .2f, 2.5f);
+            view.zoom = stepZoom(view.zoom, steps);
             view.pan.x = size.x / 2 - (size.x / 2 - view.pan.x) * view.zoom / before;
             view.pan.y = size.y / 2 - (size.y / 2 - view.pan.y) * view.zoom / before;
         };
         if (ImGui::IsKeyPressed(ImGuiKey_Equal) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd))
-            zoomBy(1.2f);
+            zoomBy(1);
         if (ImGui::IsKeyPressed(ImGuiKey_Minus) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract))
-            zoomBy(1 / 1.2f);
+            zoomBy(-1);
     }
 
-    View v{{start.x + view.pan.x, start.y + view.pan.y}, view.zoom};
+    const auto m = metrics();
+    View v = makeView({start.x + view.pan.x, start.y + view.pan.y}, view.zoom, m);
 
     // Hit test.
     int under = -1;
@@ -838,7 +875,6 @@ void drawCanvas(Session &session) {
                 draw->AddRectFilled({start.x + x, start.y + y}, {start.x + x + 1.5f, start.y + y + 1.5f}, dot);
     }
     drawEdges(current, v, draw, session.horizontal);
-    const auto m = metrics();
     for (std::size_t i = 0; i < current.cards.size(); ++i) {
         const auto &card = current.cards[i];
         const ImVec2 a = v.at(card.position), b = v.at({card.position.x + card.size.x, card.position.y + card.size.y});
@@ -869,7 +905,10 @@ void drawCanvas(Session &session) {
             for (const auto &problem : session.problems())
                 if (problem.node == card.key.ref)
                     here.push_back(&problem);
-        if ((!here.empty() || card.element) && ImGui::BeginItemTooltip()) {
+        const auto *model = session.workspace.catalog().find(card.title);
+        const bool described = model && !model->description.empty();
+        // Only when there is something to say (an empty tooltip is just a box).
+        if ((card.key.readOnly() || !card.comment.empty() || !here.empty() || described) && ImGui::BeginItemTooltip()) {
             if (card.key.readOnly())
                 ImGui::TextDisabled("In %s (read-only here: Ctrl+Enter opens it)", card.key.ref.tree.c_str());
             if (!card.comment.empty() && card.element && card.element->parent)
@@ -879,7 +918,7 @@ void drawCanvas(Session &session) {
             for (const auto *problem : here)
                 ImGui::TextColored(severityColor(int(problem->severity)), "%s: %s", severityName(problem->severity),
                                    problem->message.c_str());
-            if (const auto *model = session.workspace.catalog().find(card.title); model && !model->description.empty())
+            if (described)
                 ImGui::TextWrapped("%s", model->description.c_str());
             ImGui::EndTooltip();
         }

@@ -4,6 +4,7 @@
 #include "notgroot/core/models.hpp"
 #include <imgui.h>
 #include <string>
+#include <vector>
 
 namespace notgroot::ui {
 bool darkTheme();
@@ -23,5 +24,16 @@ const char *directionBadge(core::PortDirection); // IN, OUT, IO
 // Problem severity colors from the theme (error, warn, muted).
 ImVec4 severityColor(int severity);
 ImVec4 withAlpha(ImVec4, float);
+
+// The canvas zooms in steps, and its card fonts are baked at every step so text is drawn at the size it was
+// rasterized at (scaling a bitmap font blurs it).
+const std::vector<float> &zoomLevels();
+// The step nearest a zoom; the next step in or out from one.
+float nearestZoom(float zoom);
+float stepZoom(float zoom, int steps);
+// Card fonts per step (title, body), set by the window after loading fonts; null when a step has none.
+void setCanvasFonts(std::vector<ImFont *> titles, std::vector<ImFont *> bodies);
+ImFont *canvasTitleFont(float zoom);
+ImFont *canvasBodyFont(float zoom);
 ImVec4 mix(ImVec4 a, ImVec4 b, float t);
 } // namespace notgroot::ui
