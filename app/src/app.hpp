@@ -49,6 +49,7 @@ class App {
     std::string preference(const char *key) const;
 
     unsigned logoTexture();
+    void loadNodeIcons(); // content/icons/nodes as textures for the canvas
 
     Options opt_;
     std::unique_ptr<Window> window_;
@@ -64,6 +65,7 @@ class App {
     float uiScale_ = 1, pendingScale_ = 0;
     bool showAbout_ = false, resetLayout_ = false;
     unsigned logo_ = 0;
+    std::vector<unsigned> icons_;
     int logoWidth_ = 0, logoHeight_ = 0;
     int frameCount_ = 0;
 };

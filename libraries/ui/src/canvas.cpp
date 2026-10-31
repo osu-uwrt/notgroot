@@ -29,6 +29,7 @@ struct Card {
     bool root = false, call = false, opened = false, folded = false;
     std::string title, subtitle, comment;
     std::string color; // a subtree's own color (#rrggbb), for its calls and its root card
+    Accent accent;     // Groot's accent and icon for its type
     std::vector<Row> rows;
     int hidden = 0; // nodes folded away under it
     int parent = -1, depth = 0;
@@ -110,6 +111,7 @@ void describe(Session &session, Card &card, const Element &element) {
     card.title = id;
     card.subtitle = element.get("name");
     card.category = nodeCategory(element, catalog);
+    card.accent = nodeAccent(card.call ? "SubTree" : id, card.category);
     if (card.call)
         card.color = treeColor(session.workspace, id);
     const NodeModel *model = catalog.find(id);
@@ -137,8 +139,13 @@ void describe(Session &session, Card &card, const Element &element) {
             card.comment = firstLine(element.parent->children[at - 1]->text);
 }
 
+// The icon before a title is a square as tall as the title's line.
+float iconRoom(const Card &card, const Metrics &m) {
+    return nodeIcon(card.accent.icon) ? m.title->FontSize + ui(5) : 0;
+}
+
 void measure(Card &card, const Metrics &m) {
-    float width = textWidth(m.title, card.title);
+    float width = iconRoom(card, m) + textWidth(m.title, card.title);
     if (!card.subtitle.empty())
         width = std::max(width, textWidth(m.body, card.subtitle));
     const float badge = textWidth(m.body, "OUT") + m.pad;
@@ -360,7 +367,10 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
     const ImVec4 band = !card.color.empty() ? subtreeColor(card.color)
                         : card.root         ? rootColor()
                                             : categoryColor(card.category);
-    const ImVec4 bandInk = inkOn(band, {1, 1, 1, 1}, 3.f);
+    // The category is a strip down the left and a tint in the header; the accent (Groot's colors) marks the
+    // nodes that change the flow, so they don't read as one more box.
+    const ImVec4 header = mix(body, band, darkTheme() ? .24f : .16f);
+    const ImVec4 bandInk = card.accent.colored ? readableOn(card.accent.color, header) : palette().text;
     const bool keyed = std::any_of(card.rows.begin(), card.rows.end(), [&](const Row &row) {
         return row.value == "{" + session.highlightKey + "}" || mentions(row.value, session.highlightKey) ||
                rowWritesKey(row, session.highlightKey);
@@ -370,27 +380,37 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
     draw->AddRectFilled({a.x + 2 * z, a.y + 3 * z}, {b.x + 2 * z, b.y + 3 * z},
                         ImGui::GetColorU32(ImVec4(0, 0, 0, darkTheme() ? .35f : .12f)), rounding);
     draw->AddRectFilled(a, b, ImGui::GetColorU32(withAlpha(body, alpha)), rounding);
-    const float header = (m.header + (card.subtitle.empty() ? 0 : m.body->FontSize + m.rowGap)) * z;
-    draw->AddRectFilled(a, {b.x, a.y + header}, ImGui::GetColorU32(withAlpha(band, alpha)), rounding,
+    const float headerHeight = (m.header + (card.subtitle.empty() ? 0 : m.body->FontSize + m.rowGap)) * z;
+    draw->AddRectFilled(a, {b.x, a.y + headerHeight}, ImGui::GetColorU32(withAlpha(header, alpha)), rounding,
                         card.rows.empty() ? ImDrawFlags_RoundCornersAll : ImDrawFlags_RoundCornersTop);
+    draw->AddRectFilled(a, {a.x + std::max(2.f, ui(4) * z), b.y}, ImGui::GetColorU32(withAlpha(band, alpha)), rounding,
+                        ImDrawFlags_RoundCornersLeft);
 
-    // Title, name, comment marker.
+    // Icon, title, name, comment marker.
     float y = a.y + ui(5) * z;
     const float x = a.x + m.pad * z;
-    text(draw, view.title, view.titleSize, {x, y}, ImGui::GetColorU32(bandInk), card.title.c_str());
+    const float icon = iconRoom(card, m) * z;
+    if (icon > 0) {
+        const float side = m.title->FontSize * z;
+        draw->AddImage(
+            nodeIcon(card.accent.icon), {std::round(x), std::round(y)}, {std::round(x + side), std::round(y + side)},
+            {0, 0}, {1, 1},
+            ImGui::GetColorU32(withAlpha(card.accent.colored ? bandInk : withAlpha(palette().text, .8f), alpha)));
+    }
+    text(draw, view.title, view.titleSize, {x + icon, y}, ImGui::GetColorU32(bandInk), card.title.c_str());
     if (!card.comment.empty())
         text(draw, view.body, view.bodySize,
              {b.x - m.pad * z - drawnWidth(view, "//"), y + (m.title->FontSize - m.body->FontSize) * z},
-             ImGui::GetColorU32(withAlpha(bandInk, .75f)), "//");
+             ImGui::GetColorU32(withAlpha(palette().muted, alpha)), "//");
     y += m.title->FontSize * z;
     if (!card.subtitle.empty()) {
         y += m.rowGap * z;
-        text(draw, view.body, view.bodySize, {x, y}, ImGui::GetColorU32(withAlpha(bandInk, .85f)),
+        text(draw, view.body, view.bodySize, {x, y}, ImGui::GetColorU32(withAlpha(palette().muted, alpha)),
              card.subtitle.c_str());
     }
 
     // Port rows: badge, name, value (a key in its own color).
-    y = a.y + header + m.pad * z;
+    y = a.y + headerHeight + m.pad * z;
     const float badgeWidth = (textWidth(m.body, "OUT") + m.pad) * z;
     for (const auto &row : card.rows) {
         const float line = m.body->FontSize * z;
@@ -421,6 +441,9 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
     const ImU32 edge = ImGui::GetColorU32(withAlpha(band, .9f * alpha));
     if (card.call)
         dashedRect(draw, a, b, edge, std::max(1.f, ui(1.5f) * z), ui(5) * z);
+    else if (card.accent.colored)
+        draw->AddRect(a, b, ImGui::GetColorU32(withAlpha(readableOn(card.accent.color, body), .85f * alpha)), rounding,
+                      0, std::max(1.5f, ui(2) * z));
     else
         draw->AddRect(a, b, ImGui::GetColorU32(withAlpha(style.Colors[ImGuiCol_Border], alpha)), rounding, 0,
                       std::max(1.f, z));

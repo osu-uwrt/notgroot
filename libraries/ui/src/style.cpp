@@ -3,6 +3,7 @@
 #include "notgroot/ui/theme.hpp"
 #include <algorithm>
 #include <cmath>
+#include <map>
 
 namespace notgroot::ui {
 namespace {
@@ -16,6 +17,7 @@ float luminance(ImVec4 c) {
 
 // FNV-1a: the same key gets the same hue in every session.
 std::vector<ImFont *> titleFonts, bodyFonts;
+std::map<std::string, ImTextureID> icons;
 
 std::size_t levelOf(float zoom) {
     const auto &levels = zoomLevels();
@@ -86,6 +88,64 @@ ImVec4 subtreeColor(const std::string &text) {
         return categoryColor(core::Category::SubTree);
     }
     return hex(rgb);
+}
+
+Accent nodeAccent(const std::string &id, core::Category category) {
+    struct Style {
+        const char *id;
+        unsigned rgb; // 0: no accent color
+        const char *icon;
+    };
+    // Groot's caption colors and icons; BT.CPP 4 names (SequenceStar is SequenceWithMemory).
+    static const Style styles[] = {
+        {"Sequence", 0xff99bb, "sequence"},
+        {"SequenceWithMemory", 0xffaacc, "sequence_star"},
+        {"ReactiveSequence", 0xff77aa, "sequence_reactive"},
+        {"Fallback", 0x77ccff, "fallback"},
+        {"ReactiveFallback", 0x44aadd, "fallback_reactive"},
+        {"AlwaysSuccess", 0x00ff00, nullptr},
+        {"ForceSuccess", 0x00ff00, nullptr},
+        {"AlwaysFailure", 0xff2222, nullptr},
+        {"ForceFailure", 0xff2222, nullptr},
+        {"Inverter", 0xffee77, "not_equal"},
+        {"Repeat", 0xffee77, "repeat"},
+        {"RetryUntilSuccessful", 0xffee77, "retry"},
+        {"Timeout", 0xffee77, "timeout"},
+        {"SetBlackboard", 0, "edit_list"},
+        {"SetBlackboardV3", 0, "edit_list"},
+    };
+    Accent accent;
+    for (const auto &style : styles)
+        if (id == style.id) {
+            accent.icon = style.icon;
+            if (style.rgb)
+                accent.color = hex(style.rgb), accent.colored = true;
+            return accent;
+        }
+    // The rest by category: conditions green, decorators yellow, calls the subtree icon.
+    if (category == core::Category::Condition)
+        accent.color = hex(0x44bb44), accent.colored = true;
+    else if (category == core::Category::Decorator)
+        accent.color = hex(0xffee77), accent.colored = true;
+    else if (category == core::Category::SubTree)
+        accent.icon = "subtree";
+    return accent;
+}
+
+ImVec4 readableOn(ImVec4 color, ImVec4 paper) {
+    const bool lighten = luminance(paper) < .4f;
+    for (int i = 0; i < 8 && contrastRatio(color, paper) < 4.5f; ++i)
+        color = mix(color, lighten ? ImVec4(1, 1, 1, 1) : ImVec4(0, 0, 0, 1), .2f);
+    return color;
+}
+
+void setNodeIcon(const std::string &name, ImTextureID texture) {
+    icons[name] = texture;
+}
+
+ImTextureID nodeIcon(const char *name) {
+    const auto found = name ? icons.find(name) : icons.end();
+    return found == icons.end() ? ImTextureID() : found->second;
 }
 
 ImVec4 inkOnCategory(core::Category category) {

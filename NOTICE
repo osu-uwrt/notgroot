@@ -8,3 +8,4 @@ This product bundles third-party software under its own license:
   Dear ImGui (third_party/imgui)   MIT License, see third_party/imgui/LICENSE.txt
   Barlow fonts (content/fonts)   SIL Open Font License 1.1, see content/fonts/OFL.txt
   Groot tree icon, the base of content/icons (tools/make_logo.py)   MIT License, Copyright (c) 2018-2019 Fundacio Eurecat; see content/icons/GROOT-LICENSE.txt
+  Groot node icons and accent colors, content/icons/nodes (tools/make_node_icons.py)   same license

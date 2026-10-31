@@ -1,6 +1,7 @@
 // App: window, menus, dockspace and preferences around the editor panels.
 #include "app.hpp"
 #include "notgroot/ui/panels.hpp"
+#include "notgroot/ui/style.hpp"
 #include "notgroot/ui/theme.hpp"
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -41,6 +42,7 @@ App::App(Options options) : opt_(std::move(options)) {
                       content_ / "icons/notgroot_48.png", content_ / "icons/notgroot_64.png",
                       content_ / "icons/notgroot_128.png", content_ / "icons/notgroot_256.png"});
     window_->setIdleWait(hidden ? 0 : 0.5);
+    loadNodeIcons();
 
     // Layout: the last session's docking, else the default arrangement built on the first frame.
     if (!config_.empty() && fs::exists(config_ / "layout.ini"))
@@ -153,6 +155,8 @@ App::~App() {
     }
     if (logo_)
         glDeleteTextures(1, &logo_);
+    if (!icons_.empty())
+        glDeleteTextures(GLsizei(icons_.size()), icons_.data());
 }
 
 std::string App::preferredTheme() const {
@@ -246,6 +250,27 @@ unsigned App::logoTexture() {
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, logoWidth_, logoHeight_, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
     return logo_;
+}
+
+// Groot's node icons, white on clear and mipmapped so they stay smooth at every zoom; the canvas tints them.
+void App::loadNodeIcons() {
+    std::error_code error;
+    for (const auto &entry : fs::directory_iterator(content_ / "icons/nodes", error)) {
+        int width = 0, height = 0;
+        std::vector<unsigned char> rgba;
+        if (entry.path().extension() != ".png" || !readPng(entry.path(), width, height, rgba))
+            continue;
+        unsigned texture = 0;
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+        glGenerateMipmap(GL_TEXTURE_2D);
+        icons_.push_back(texture);
+        ui::setNodeIcon(entry.path().stem().string(), ImTextureID(texture));
+    }
 }
 
 int App::run() {

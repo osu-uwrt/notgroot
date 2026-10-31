@@ -14,6 +14,19 @@ ImVec4 categoryColor(core::Category);
 ImVec4 rootColor();
 // A subtree's color: its own (notgroot:color metadata) if set, else the subtree category's.
 ImVec4 subtreeColor(const std::string &hex);
+// What sets a node type apart on the canvas, after Groot (bt_editor/resources/NodesStyle.json): an accent for its
+// title, icon and outline, and the name of its icon (content/icons/nodes). Plain nodes have neither.
+struct Accent {
+    ImVec4 color{0, 0, 0, 0};
+    bool colored = false;
+    const char *icon = nullptr;
+};
+Accent nodeAccent(const std::string &id, core::Category);
+// `color` nudged lighter or darker until it reads on `paper` (4.5:1).
+ImVec4 readableOn(ImVec4 color, ImVec4 paper);
+// Node icon textures (white shapes, drawn tinted), registered by the window by name.
+void setNodeIcon(const std::string &name, ImTextureID);
+ImTextureID nodeIcon(const char *name);
 // Ink that reads on a category's fill.
 ImVec4 inkOnCategory(core::Category);
 // A blackboard key's color: hue from its name, lightness for the theme's paper.
