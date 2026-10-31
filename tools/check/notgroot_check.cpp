@@ -50,6 +50,33 @@ class Control : public BT::ControlNode {
     }
 };
 
+// A model port with its type from node_models.xml (the plugins' types decide what a key may hold at load); no type
+// or one this check doesn't know is untyped, as BehaviorTree.CPP's own InputPort(name).
+template <typename T> std::pair<std::string, BT::PortInfo> typedPort(const std::string &kind, const std::string &name) {
+    if (kind == "input_port")
+        return BT::InputPort<T>(name);
+    if (kind == "output_port")
+        return BT::OutputPort<T>(name);
+    return BT::BidirectionalPort<T>(name);
+}
+
+std::pair<std::string, BT::PortInfo> modelPort(const std::string &kind, const std::string &name,
+                                               const std::string &type) {
+    if (type == "std::string")
+        return typedPort<std::string>(kind, name);
+    if (type == "int")
+        return typedPort<int>(kind, name);
+    if (type == "double")
+        return typedPort<double>(kind, name);
+    if (type == "float")
+        return typedPort<float>(kind, name);
+    if (type == "bool")
+        return typedPort<bool>(kind, name);
+    if (type == "unsigned int")
+        return typedPort<unsigned>(kind, name);
+    return typedPort<BT::AnyTypeAllowed>(kind, name);
+}
+
 template <typename T> BT::NodeBuilder builder() {
     return [](const std::string &name, const BT::NodeConfig &config) { return std::make_unique<T>(name, config); };
 }
@@ -70,12 +97,8 @@ bool registerModels(BT::BehaviorTreeFactory &factory, const fs::path &file, std:
         BT::PortsList ports;
         for (auto *port = entry->FirstChildElement(); port; port = port->NextSiblingElement()) {
             const std::string kind = port->Name(), name = port->Attribute("name") ? port->Attribute("name") : "";
-            if (kind == "input_port")
-                ports.insert(BT::InputPort<std::string>(name));
-            else if (kind == "output_port")
-                ports.insert(BT::OutputPort<std::string>(name));
-            else if (kind == "inout_port")
-                ports.insert(BT::BidirectionalPort<std::string>(name));
+            if (kind == "input_port" || kind == "output_port" || kind == "inout_port")
+                ports.insert(modelPort(kind, name, port->Attribute("type") ? port->Attribute("type") : ""));
         }
         BT::TreeNodeManifest manifest;
         manifest.registration_ID = id;

@@ -283,7 +283,7 @@ TEST_F(Fixture, ToyWorkspaceIsValid) {
     int typed = 0;
     for (const auto &problem : validate(workspace)) {
         EXPECT_NE(problem.severity, Severity::Error) << problem.file << ":" << problem.line << ": " << problem.message;
-        typed += problem.message.find("types this key") != std::string::npos;
+        typed += problem.message.find("fails to load") != std::string::npos;
     }
     EXPECT_EQ(typed, 1); // Move x="2"
 }

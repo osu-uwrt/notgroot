@@ -19,6 +19,32 @@ const char *severityName(Severity severity) {
 }
 
 namespace {
+// The type BehaviorTree.CPP 4.10 gives text passed into a subtree: bool, int, double, or "" (it stays text).
+std::string literalType(const std::string &text) {
+    if (text == "true" || text == "false")
+        return "bool";
+    char *end = nullptr;
+    std::strtol(text.c_str(), &end, 10);
+    if (end && *end == '\0')
+        return "int";
+    std::strtod(text.c_str(), &end);
+    return end && *end == '\0' ? "double" : "";
+}
+
+// Every model port in a tree whose value is exactly `value` (SubTree calls pass it on and are skipped).
+void forEachUse(const Element &element, const std::string &value, const Catalog &catalog,
+                const std::function<void(const PortModel &)> &visit) {
+    for (const auto *child : element.elements()) {
+        if (!isSubTree(*child))
+            if (const auto *model = catalog.find(nodeId(*child)))
+                for (const auto &attribute : child->attributes)
+                    if (attribute.value == value)
+                        if (const auto *port = model->port(attribute.name))
+                            visit(*port);
+        forEachUse(*child, value, catalog, visit);
+    }
+}
+
 void checkNode(const Workspace &workspace, const Document &document, const Element &node, const NodeRef &ref,
                std::vector<Problem> &out) {
     const auto add = [&](Severity severity, std::string message, std::string attribute = {}) {
@@ -66,19 +92,28 @@ void checkNode(const Workspace &workspace, const Document &document, const Eleme
         if (isKeyReference(value) && keyOf(value).find_first_of("{}") != std::string::npos)
             add(Severity::Warning, name + ": a value that starts with { and ends with } is one key", name);
     }
-    // BehaviorTree.CPP 4 gives a key passed into a subtree as text the type the text looks like ("2": int); a node
-    // in the subtree reading it as text (every std::string port) then fails the tree's load.
-    if (call)
+    // BehaviorTree.CPP 4 gives a key passed into a subtree as text the type the text looks like ("2": int, "2.5":
+    // double, "true": bool); a node in the subtree whose port has another type (std::string, or double for an int)
+    // then fails the tree's load. Untyped ports (BT::AnyTypeAllowed) take anything.
+    const auto *called = call ? workspace.tree(id) : nullptr;
+    if (called)
         for (const auto &attribute : node.attributes) {
             if (isReservedAttribute(attribute.name) || isKeyReference(attribute.value) || attribute.value.empty())
                 continue;
-            const auto &v = attribute.value;
-            char *end = nullptr;
-            std::strtod(v.c_str(), &end);
-            if ((end && *end == '\0') || v == "true" || v == "false")
+            const auto literal = literalType(attribute.value);
+            if (literal.empty())
+                continue;
+            std::string clash;
+            forEachUse(*called->tree, "{" + attribute.name + "}", catalog, [&](const PortModel &port) {
+                if (clash.empty() && !port.type.empty() && port.type.find("AnyTypeAllowed") == std::string::npos &&
+                    port.type != literal)
+                    clash = port.type;
+            });
+            if (!clash.empty())
                 add(Severity::Warning,
-                    attribute.name + "=\"" + v + "\": BehaviorTree.CPP types this key as a number or bool inside " +
-                        id + "; a node there reading it as text fails to load. Pass a {key} instead",
+                    attribute.name + "=\"" + attribute.value + "\": BehaviorTree.CPP makes this a " + literal +
+                        " inside " + id + ", where a port reads it as " + clash +
+                        ", so the tree fails to load. Pass a {key}, or make that port untyped",
                     attribute.name);
         }
     if (call && model)
