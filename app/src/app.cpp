@@ -1,8 +1,10 @@
 // App: window, menus, dockspace and preferences around the editor panels.
 #include "app.hpp"
+#include "notgroot/ui/panels.hpp"
 #include "notgroot/ui/theme.hpp"
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <imgui.h>
@@ -63,9 +65,85 @@ App::App(Options options) : opt_(std::move(options)) {
     }
     ui::setInterfaceScale(uiScale_);
     window_->loadFonts(uiScale_, ui::currentThemeInfo(), content_ / "fonts");
+
+    // The editor: builtin models, then the trees asked for, else the last ones open.
+    std::string error;
+    if (!session_.loadBuiltinModels(content_ / "builtin_models.xml", error))
+        std::cerr << "notgroot: " << error << '\n';
+    session_.quit = [this] { quit(); };
+    session_.browse = [this] {
+        const auto start = session_.workspace.isOpen() ? session_.workspace.directory() : fs::path();
+        if (!picker_.open("Open a trees folder", start, "", {}, true))
+            session_.status(picker_.hint(), true);
+    };
+    picker_.setParent(0);
+    session_.horizontal = preference("layout") == "left-right";
+    if (!config_.empty() && fs::exists(config_ / "notgroot.yaml"))
+        try {
+            for (const auto &path : YAML::LoadFile((config_ / "notgroot.yaml").string())["recent"])
+                if (fs::exists(path.as<std::string>()))
+                    recent_.push_back(path.as<std::string>());
+        } catch (const std::exception &) {
+        }
+    if (!opt_.open.empty())
+        openWorkspace(opt_.open);
+    else if (!recent_.empty())
+        openWorkspace(recent_.front());
+}
+
+void App::openWorkspace(const fs::path &path) {
+    std::string error;
+    if (!session_.open(path, error)) {
+        session_.status(error, true);
+        return;
+    }
+    // Remembered for next time (most recent first, ten at most).
+    const auto dir = session_.workspace.loose() ? fs::absolute(path).string() : session_.workspace.directory().string();
+    recent_.erase(std::remove(recent_.begin(), recent_.end(), dir), recent_.end());
+    recent_.insert(recent_.begin(), dir);
+    if (recent_.size() > 10)
+        recent_.resize(10);
+    if (config_.empty())
+        return;
+    try {
+        const auto file = config_ / "notgroot.yaml";
+        YAML::Node preferences(YAML::NodeType::Map);
+        if (fs::exists(file))
+            preferences = YAML::LoadFile(file.string());
+        preferences["recent"] = recent_;
+        fs::create_directories(config_);
+        std::ofstream(file) << preferences << '\n';
+    } catch (const std::exception &error) {
+        std::cerr << "notgroot: recent not saved: " << error.what() << '\n';
+    }
+}
+
+void App::quit() {
+    if (!session_.dirty()) {
+        closing_ = true;
+        window_->requestClose();
+        return;
+    }
+    session_.afterUnsaved = [this] {
+        closing_ = true;
+        window_->requestClose();
+    };
+    session_.ask(ui::Session::Dialog::Unsaved);
+}
+
+void App::updateTitle() {
+    std::string title = "notgroot";
+    if (session_.workspace.isOpen())
+        title = (session_.dirty() ? "• " : "") + session_.workspace.directory().string() +
+                (session_.active.empty() ? "" : " — " + session_.active) + " — notgroot";
+    if (title != title_) {
+        title_ = title;
+        window_->setTitle(title);
+    }
 }
 
 App::~App() {
+    savePreference("layout", session_.horizontal ? "left-right" : "");
     if (!config_.empty()) {
         std::error_code error;
         fs::create_directories(config_, error);
@@ -169,7 +247,14 @@ unsigned App::logoTexture() {
 }
 
 int App::run() {
-    while (!window_->closing()) {
+    while (true) {
+        // The window's close button asks first when trees have unsaved edits.
+        if (window_->closing() && !closing_) {
+            window_->cancelClose();
+            quit();
+        }
+        if (window_->closing() && closing_)
+            break;
         applyPending();
         window_->beginFrame();
         frame();
@@ -184,25 +269,144 @@ int App::run() {
 }
 
 void App::frame() {
+    // Files picked in the desktop dialog, and files changed on disk (checked once a second).
+    if (auto picked = picker_.take())
+        openWorkspace(*picked);
+    if (ImGui::GetTime() - lastPoll_ > 1) {
+        lastPoll_ = ImGui::GetTime();
+        session_.pollDisk();
+    }
+    session_.problems(); // keeps the cursor valid after undo / reload
+
     menuBar();
+    statusBar();
     dockspace();
+    const auto panel = [&](const char *name, void (*draw)(ui::Session &), ImGuiWindowFlags flags = 0) {
+        if (ImGui::Begin(name, nullptr, flags))
+            draw(session_);
+        ImGui::End();
+    };
+    panel("Trees", ui::drawExplorer);
+    panel("Palette", ui::drawPalette);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0, 0});
+    const bool canvas =
+        ImGui::Begin("Canvas", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleVar();
+    if (canvas)
+        ui::drawCanvas(session_);
+    else
+        session_.canvasFocused = false;
+    ImGui::End();
+    panel("Inspector", ui::drawInspector);
+    panel("Variables", ui::drawVariables);
+    panel("Problems", ui::drawProblems);
+
+    ui::drawFinder(session_);
+    ui::drawPicker(session_);
+    ui::drawDialogs(session_);
     aboutWindow();
+    ui::handleShortcuts(session_);
+    updateTitle();
+}
+
+// The arrangement on first start (or after View > Reset layout): trees and palette on the left, the canvas in
+// the middle, inspector and variables on the right, problems along the bottom.
+void App::defaultLayout(unsigned dock) {
+    ImGui::DockBuilderRemoveNode(dock);
+    ImGui::DockBuilderAddNode(dock, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dock, ImGui::GetMainViewport()->WorkSize);
+    ImGuiID center = dock;
+    const ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, .17f, nullptr, &center);
+    const ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, .27f, nullptr, &center);
+    const ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, .2f, nullptr, &center);
+    ImGuiID rightTop = right;
+    const ImGuiID rightBottom = ImGui::DockBuilderSplitNode(rightTop, ImGuiDir_Down, .42f, nullptr, &rightTop);
+    ImGui::DockBuilderDockWindow("Trees", left);
+    ImGui::DockBuilderDockWindow("Palette", left);
+    ImGui::DockBuilderDockWindow("Canvas", center);
+    ImGui::DockBuilderDockWindow("Inspector", rightTop);
+    ImGui::DockBuilderDockWindow("Variables", rightBottom);
+    ImGui::DockBuilderDockWindow("Problems", bottom);
+    ImGui::DockBuilderFinish(dock);
 }
 
 void App::dockspace() {
     const ImGuiViewport *viewport = ImGui::GetMainViewport();
-    ImGui::DockSpaceOverViewport(ImGui::GetID("notgroot_dock"), viewport, ImGuiDockNodeFlags_PassthruCentralNode);
+    const ImGuiID dock = ImGui::GetID("notgroot_dock");
+    static bool reset = false;
+    if (!ImGui::DockBuilderGetNode(dock) || ImGui::DockBuilderGetNode(dock)->IsLeafNode() || resetLayout_) {
+        defaultLayout(dock);
+        resetLayout_ = false;
+        reset = true;
+    }
+    ImGui::DockSpaceOverViewport(dock, viewport);
+    if (reset) { // the trees panel in front of the palette
+        ImGui::SetWindowFocus("Trees");
+        reset = false;
+    }
+}
+
+void App::statusBar() {
+    const float height = ImGui::GetFrameHeight();
+    if (!ImGui::BeginViewportSideBar("##status", ImGui::GetMainViewport(), ImGuiDir_Down, height,
+                                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings |
+                                         ImGuiWindowFlags_MenuBar)) {
+        ImGui::End();
+        return;
+    }
+    if (ImGui::BeginMenuBar()) {
+        const bool fresh = ImGui::GetTime() - session_.statusTime < 8;
+        if (fresh && !session_.statusText.empty())
+            ImGui::TextColored(session_.statusError ? ui::palette().error : ui::palette().text, "%s",
+                               session_.statusText.c_str());
+        else
+            ImGui::TextDisabled("Ctrl+P find · Ctrl+Shift+P commands · Tab add child · Enter edit · Space fold / "
+                                "open subtree · F8 next problem");
+        // Right side: problem counts and the layout direction.
+        int errors = 0, warnings = 0;
+        for (const auto &problem : session_.problems()) {
+            errors += problem.severity == core::Severity::Error;
+            warnings += problem.severity == core::Severity::Warning;
+        }
+        char counts[96];
+        std::snprintf(counts, sizeof(counts), "%d errors  %d warnings  %s", errors, warnings,
+                      session_.horizontal ? "left-right" : "top-down");
+        const float width = ImGui::CalcTextSize(counts).x + ImGui::GetStyle().ItemSpacing.x * 2;
+        ImGui::SameLine(ImGui::GetWindowWidth() - width);
+        ImGui::TextColored(errors ? ui::palette().error : ui::palette().muted, "%s", counts);
+        ImGui::EndMenuBar();
+    }
+    ImGui::End();
 }
 
 void App::menuBar() {
     if (!ImGui::BeginMainMenuBar())
         return;
+    const auto commands = [&](const char *group) {
+        for (const auto &command : session_.commands)
+            if (command.group == group && command.id != "edit.redo2" &&
+                ImGui::MenuItem(command.label.c_str(), ui::chordName(command.chord).c_str(), false,
+                                !command.enabled || command.enabled()))
+                command.run();
+    };
     if (ImGui::BeginMenu("File")) {
-        if (ImGui::MenuItem("Quit", "Ctrl+Q"))
-            window_->requestClose();
+        commands("File");
+        if (ImGui::BeginMenu("Open recent", !recent_.empty())) {
+            for (const auto &path : std::vector<std::string>(recent_))
+                if (ImGui::MenuItem(path.c_str()))
+                    openWorkspace(path);
+            ImGui::EndMenu();
+        }
         ImGui::EndMenu();
     }
+    for (const char *group : {"Edit", "Node", "Tree"})
+        if (ImGui::BeginMenu(group)) {
+            commands(group);
+            ImGui::EndMenu();
+        }
     if (ImGui::BeginMenu("View")) {
+        commands("View");
+        ImGui::Separator();
         if (ImGui::BeginMenu("Theme")) {
             if (ImGui::MenuItem("Follow Nereus", nullptr, followNereus_)) {
                 followNereus_ = true;
@@ -232,6 +436,8 @@ void App::menuBar() {
             }
             ImGui::EndMenu();
         }
+        if (ImGui::MenuItem("Reset panel layout"))
+            resetLayout_ = true;
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Help")) {
@@ -240,9 +446,6 @@ void App::menuBar() {
         ImGui::EndMenu();
     }
     ImGui::EndMainMenuBar();
-
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Q, ImGuiInputFlags_RouteGlobal))
-        window_->requestClose();
 }
 
 void App::aboutWindow() {

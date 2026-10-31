@@ -1,0 +1,548 @@
+// Session: shared editor state and the commands.
+#include "notgroot/ui/session.hpp"
+#include <algorithm>
+#include <imgui_internal.h>
+
+namespace notgroot::ui {
+using namespace core;
+
+Session::Session() {
+    registerCommands();
+}
+
+bool Session::loadBuiltinModels(const std::filesystem::path &file, std::string &error) {
+    return workspace.loadBuiltinModels(file, error);
+}
+
+bool Session::open(const std::filesystem::path &path, std::string &error) {
+    if (!workspace.open(path, error))
+        return false;
+    history.clear();
+    tabs.clear();
+    views_.clear();
+    active.clear();
+    cursor = {};
+    selection.clear();
+    highlightKey.clear();
+    conflicts.clear();
+    // Open the file asked for, else the first mission.
+    std::string first;
+    for (const auto &[key, entry] : workspace.trees())
+        if (entry.document->path == workspace.focus() && (first.empty() || key != entry.id))
+            first = key;
+    if (first.empty() && !workspace.missions().empty())
+        first = workspace.missions().front();
+    if (first.empty() && !workspace.trees().empty())
+        first = workspace.trees().begin()->first;
+    if (!first.empty())
+        openTree(first);
+    status("Opened " + workspace.directory().string() + " (" + std::to_string(workspace.trees().size()) + " trees)");
+    return true;
+}
+
+bool Session::dirty() const {
+    for (const auto &document : workspace.documents())
+        if (document->dirty())
+            return true;
+    return false;
+}
+
+void Session::save() {
+    std::vector<std::string> errors;
+    const auto written = workspace.save(errors);
+    if (!errors.empty()) {
+        status(errors.front(), true);
+        return;
+    }
+    int bad = 0;
+    for (const auto &problem : problems())
+        bad += problem.severity == Severity::Error;
+    if (written.empty())
+        status("Nothing to save");
+    else
+        status("Saved " + std::to_string(written.size()) + (written.size() == 1 ? " file" : " files") +
+                   (bad ? " — " + std::to_string(bad) + " problems will stop it loading (F8)" : ""),
+               bad > 0);
+}
+
+void Session::pollDisk() {
+    if (!workspace.isOpen())
+        return;
+    for (auto *document : workspace.changedOnDisk()) {
+        if (std::find(conflicts.begin(), conflicts.end(), document) != conflicts.end())
+            continue;
+        if (document->dirty())
+            conflicts.push_back(document);
+        else {
+            workspace.reload(*document);
+            history.clear(); // its snapshots predate the file now on disk
+            status("Reloaded " + document->path.filename().string() + " (changed on disk)");
+        }
+    }
+}
+
+void Session::openTree(const std::string &key) {
+    if (!workspace.tree(key))
+        return;
+    if (std::find(tabs.begin(), tabs.end(), key) == tabs.end())
+        tabs.push_back(key);
+    if (active != key) {
+        active = key;
+        selection.clear();
+        highlightKey.clear();
+        cursor = {{key, {}}, {}};
+    }
+    focusCanvas = true;
+}
+
+void Session::closeTree(const std::string &key) {
+    const auto found = std::find(tabs.begin(), tabs.end(), key);
+    if (found == tabs.end())
+        return;
+    const auto index = found - tabs.begin();
+    tabs.erase(found);
+    if (active == key) {
+        active.clear();
+        if (!tabs.empty())
+            openTree(tabs[std::size_t(std::min<long>(index, long(tabs.size()) - 1))]);
+    }
+}
+
+void Session::setCursor(const CardKey &key, bool keepSelection) {
+    cursor = key;
+    if (!keepSelection)
+        selection.clear();
+    revealPending = true;
+}
+
+void Session::toggleSelected(const NodeRef &ref) {
+    const auto found = std::find(selection.begin(), selection.end(), ref);
+    if (found == selection.end())
+        selection.push_back(ref);
+    else
+        selection.erase(found);
+}
+
+bool Session::selected(const NodeRef &ref) const {
+    return std::find(selection.begin(), selection.end(), ref) != selection.end();
+}
+
+std::vector<NodeRef> Session::targets() const {
+    if (!selection.empty())
+        return selection;
+    if (!cursor.readOnly() && !cursor.ref.empty())
+        return {cursor.ref};
+    return {};
+}
+
+void Session::reveal(const NodeRef &ref) {
+    if (ref.empty())
+        return;
+    openTree(ref.tree);
+    // Unfold the way down to it.
+    auto &v = view(ref.tree);
+    for (std::size_t depth = 0; depth < ref.path.size(); ++depth)
+        v.folded.erase(std::vector<std::size_t>(ref.path.begin(), ref.path.begin() + std::ptrdiff_t(depth)));
+    setCursor(ref);
+}
+
+void Session::edited(const NodeRef &made) {
+    if (made.empty()) {
+        if (!editor.error().empty())
+            status(editor.error(), true);
+        return;
+    }
+    setCursor(made);
+    focusCanvas = true;
+}
+
+void Session::edited(bool ok) {
+    if (!ok && !editor.error().empty())
+        status(editor.error(), true);
+}
+
+// After undo or a reload the cursor may point at nothing: walk up until it does.
+void Session::validateCursor() {
+    if (!active.empty() && !workspace.tree(active)) {
+        closeTree(active);
+        return;
+    }
+    while (!cursor.ref.empty() && !resolve(workspace, cursor.ref)) {
+        if (cursor.ref.path.empty()) {
+            cursor = {{active, {}}, {}};
+            break;
+        }
+        cursor.ref.path.pop_back();
+    }
+    if (!cursor.origin.empty() && !resolve(workspace, cursor.origin))
+        cursor = {cursor.origin.parent(), {}};
+    selection.erase(std::remove_if(selection.begin(), selection.end(),
+                                   [&](const NodeRef &r) { return !resolve(workspace, r) || r.tree != active; }),
+                    selection.end());
+}
+
+const std::vector<Problem> &Session::problems() {
+    if (problemsVersion_ != workspace.version()) {
+        problemsVersion_ = workspace.version();
+        problems_ = validate(workspace);
+        severity_.clear();
+        for (const auto &problem : problems_) {
+            if (problem.node.empty())
+                continue;
+            auto &worst = severity_.try_emplace(problem.node, int(Severity::Note)).first->second;
+            worst = std::min(worst, int(problem.severity));
+        }
+        validateCursor();
+    }
+    return problems_;
+}
+
+int Session::severityAt(const NodeRef &ref) {
+    problems();
+    const auto found = severity_.find(ref);
+    return found == severity_.end() ? -1 : found->second;
+}
+
+const TreeVariables &Session::variables(const std::string &key) {
+    auto &cached = variables_[key];
+    if (cached.first != workspace.version() || cached.second.tree != key) {
+        cached.first = workspace.version();
+        cached.second = analyzeVariables(workspace, key);
+    }
+    return cached.second;
+}
+
+void Session::pick(PickFor purpose) {
+    const auto targets = this->targets();
+    if (purpose != PickFor::Child && targets.empty() && !(cursor.ref.isTree() && purpose == PickFor::Child)) {
+        status(cursor.readOnly() ? "This node belongs to another tree: open it to edit (Ctrl+Enter)"
+                                 : "Select a node first",
+               true);
+        return;
+    }
+    if (cursor.readOnly()) {
+        status("This node belongs to another tree: open it to edit (Ctrl+Enter)", true);
+        return;
+    }
+    picker.open = true;
+    picker.purpose = purpose;
+    picker.target = cursor.ref;
+}
+
+void Session::ask(Dialog::Kind kind, std::string target, std::string text) {
+    dialog = {kind, std::move(target), std::move(text), true};
+}
+
+void Session::status(std::string text, bool error) {
+    statusText = std::move(text);
+    statusError = error;
+    statusTime = ImGui::GetCurrentContext() ? ImGui::GetTime() : 0;
+}
+
+const Command *Session::command(const std::string &id) const {
+    for (const auto &c : commands)
+        if (c.id == id)
+            return &c;
+    return nullptr;
+}
+
+void Session::run(const std::string &id) {
+    if (const auto *c = command(id); c && (!c->enabled || c->enabled()))
+        c->run();
+}
+
+bool Session::model(const std::string &id, NodeModel &out) const {
+    const auto *found = workspace.catalog().find(id);
+    if (!found)
+        return false;
+    out = *found;
+    return true;
+}
+
+namespace {
+int callback(ImGuiInputTextCallbackData *data) {
+    if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
+        auto *text = static_cast<std::string *>(data->UserData);
+        text->resize(std::size_t(data->BufTextLen));
+        data->Buf = text->data();
+    }
+    return 0;
+}
+
+struct Chained {
+    std::string *text;
+    ImGuiInputTextCallback next;
+    void *user;
+};
+
+int chained(ImGuiInputTextCallbackData *data) {
+    auto *chain = static_cast<Chained *>(data->UserData);
+    if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
+        chain->text->resize(std::size_t(data->BufTextLen));
+        data->Buf = chain->text->data();
+        return 0;
+    }
+    data->UserData = chain->user;
+    const int result = chain->next(data);
+    data->UserData = chain;
+    return result;
+}
+} // namespace
+
+bool inputString(const char *label, std::string &text, ImGuiInputTextFlags flags, ImGuiInputTextCallback next,
+                 void *user) {
+    if (!next)
+        return ImGui::InputText(label, text.data(), text.capacity() + 1, flags | ImGuiInputTextFlags_CallbackResize,
+                                callback, &text);
+    Chained chain{&text, next, user};
+    return ImGui::InputText(label, text.data(), text.capacity() + 1, flags | ImGuiInputTextFlags_CallbackResize,
+                            chained, &chain);
+}
+
+bool inputStringWithHint(const char *label, const char *hint, std::string &text, ImGuiInputTextFlags flags) {
+    return ImGui::InputTextWithHint(label, hint, text.data(), text.capacity() + 1,
+                                    flags | ImGuiInputTextFlags_CallbackResize, callback, &text);
+}
+
+std::string chordName(ImGuiKeyChord chord) {
+    if (!chord)
+        return {};
+    return ImGui::GetKeyChordName(chord);
+}
+
+void Session::registerCommands() {
+    const auto open = [this] { return workspace.isOpen(); };
+    const auto onTree = [this] { return workspace.isOpen() && !active.empty(); };
+    const auto onNode = [this] { return !targets().empty(); };
+    const auto add = [this](Command c) { commands.push_back(std::move(c)); };
+
+    // File
+    add({"file.open", "Open trees folder or file…", "File", ImGuiMod_Ctrl | ImGuiKey_O, false,
+         [this] {
+             if (browse)
+                 browse();
+         },
+         nullptr});
+    add({"file.save", "Save", "File", ImGuiMod_Ctrl | ImGuiKey_S, false, [this] { save(); }, open});
+    add({"file.quit", "Quit", "File", ImGuiMod_Ctrl | ImGuiKey_Q, false,
+         [this] {
+             if (quit)
+                 quit();
+         },
+         nullptr});
+
+    // Edit
+    add({"edit.undo", "Undo", "Edit", ImGuiMod_Ctrl | ImGuiKey_Z, false,
+         [this] {
+             const auto label = history.undoLabel();
+             if (history.undo())
+                 status("Undid: " + label);
+         },
+         [this] { return history.canUndo(); }});
+    add({"edit.redo", "Redo", "Edit", ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z, false,
+         [this] {
+             const auto label = history.redoLabel();
+             if (history.redo())
+                 status("Redid: " + label);
+         },
+         [this] { return history.canRedo(); }});
+    add({"edit.redo2", "Redo", "Edit", ImGuiMod_Ctrl | ImGuiKey_Y, false, [this] { run("edit.redo"); },
+         [this] { return history.canRedo(); }});
+    add({"edit.copy", "Copy nodes", "Edit", ImGuiMod_Ctrl | ImGuiKey_C, true,
+         [this] {
+             const auto text = copyNodes(
+                 workspace, targets().empty() && cursor.readOnly() ? std::vector<NodeRef>{cursor.ref} : targets());
+             ImGui::SetClipboardText(text.c_str());
+             status("Copied");
+         },
+         [this] { return !targets().empty() || cursor.readOnly(); }});
+    add({"edit.cut", "Cut nodes", "Edit", ImGuiMod_Ctrl | ImGuiKey_X, true,
+         [this] {
+             ImGui::SetClipboardText(copyNodes(workspace, targets()).c_str());
+             edited(editor.remove(targets()));
+         },
+         onNode});
+    add({"edit.paste", "Paste nodes (into the cursor, else after it)", "Edit", ImGuiMod_Ctrl | ImGuiKey_V, true,
+         [this] {
+             const char *clip = ImGui::GetClipboardText();
+             auto nodes = parseClipboard(clip ? clip : "");
+             if (nodes.empty()) {
+                 status("The clipboard holds no tree nodes", true);
+                 return;
+             }
+             auto *element = resolve(workspace, cursor.ref);
+             if (element && acceptsChild(workspace, *element))
+                 edited(editor.insertMany(cursor.ref, nodeChildren(*element).size(), std::move(nodes), "Paste"));
+             else if (element && !cursor.ref.isTree()) {
+                 const auto siblings = nodeChildren(*element->parent);
+                 const auto index =
+                     std::size_t(std::find(siblings.begin(), siblings.end(), element) - siblings.begin());
+                 edited(editor.insertMany(cursor.ref.parent(), index + 1, std::move(nodes), "Paste"));
+             }
+         },
+         [this, onTree] { return onTree() && !cursor.readOnly(); }});
+    add({"edit.duplicate", "Duplicate nodes", "Edit", ImGuiMod_Ctrl | ImGuiKey_D, true,
+         [this] {
+             const auto refs = targets();
+             auto *last = resolve(workspace, refs.back());
+             if (!last || refs.back().isTree())
+                 return;
+             auto nodes = parseClipboard(copyNodes(workspace, refs));
+             auto siblings = nodeChildren(*last->parent);
+             const auto index = std::size_t(std::find(siblings.begin(), siblings.end(), last) - siblings.begin());
+             edited(editor.insertMany(refs.back().parent(), index + 1, std::move(nodes), "Duplicate"));
+         },
+         onNode});
+    add({"edit.delete", "Delete nodes", "Edit", ImGuiKey_Delete, true, [this] { edited(editor.remove(targets())); },
+         onNode});
+
+    // Node
+    add({"node.child", "Add child…", "Node", ImGuiKey_Tab, true, [this] { pick(PickFor::Child); }, onTree});
+    add({"node.sibling", "Add sibling after…", "Node", ImGuiMod_Shift | ImGuiKey_Tab, true,
+         [this] { pick(PickFor::Sibling); }, onNode});
+    add({"node.wrap", "Wrap in…", "Node", ImGuiMod_Ctrl | ImGuiKey_W, true, [this] { pick(PickFor::Wrap); }, onNode});
+    add({"node.retype", "Change node type…", "Node", ImGuiMod_Ctrl | ImGuiKey_R, true,
+         [this] { pick(PickFor::Retype); }, onNode});
+    add({"node.unwrap", "Unwrap (keep the children)", "Node", ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_W, true,
+         [this] { edited(editor.unwrap(cursor.ref)); }, onNode});
+    add({"node.earlier", "Move earlier among siblings", "Node", 0, false,
+         [this] { edited(editor.move(cursor.ref, -1)); }, onNode});
+    add({"node.later", "Move later among siblings", "Node", 0, false, [this] { edited(editor.move(cursor.ref, 1)); },
+         onNode});
+    add({"node.outdent", "Move out of the parent", "Node", 0, false, [this] { edited(editor.outdent(cursor.ref)); },
+         onNode});
+    add({"node.indent", "Move into the previous sibling", "Node", 0, false,
+         [this] { edited(editor.indent(cursor.ref)); }, onNode});
+    add({"node.edit", "Edit the node's ports", "Node", ImGuiKey_Enter, true,
+         [this] {
+             focusInspector = true;
+             focusPort.clear();
+         },
+         onTree});
+    add({"node.definition", "Open the subtree's definition", "Node", ImGuiMod_Ctrl | ImGuiKey_Enter, true,
+         [this] {
+             auto *element = resolve(workspace, cursor.ref);
+             if (element && isSubTree(*element) && workspace.tree(element->get("ID")))
+                 openTree(element->get("ID"));
+             else if (!cursor.origin.empty())
+                 reveal(cursor.ref);
+             else
+                 status("Not a subtree call", true);
+         },
+         onTree});
+
+    // Tree
+    add({"tree.newSubtree", "New subtree…", "Tree", ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N, false,
+         [this] { ask(Dialog::NewSubtree); }, open});
+    add({"tree.newMission", "New mission…", "Tree", 0, false, [this] { ask(Dialog::NewMission); }, open});
+    add({"tree.rename", "Rename tree…", "Tree", 0, false, [this] { ask(Dialog::RenameTree, active, active); }, onTree});
+    add({"tree.extract", "Extract selection to a new subtree…", "Tree", ImGuiMod_Ctrl | ImGuiKey_E, true,
+         [this] { ask(Dialog::ExtractSubtree); }, onNode});
+    add({"tree.ports", "Edit subtree ports…", "Tree", ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_E, false,
+         [this] {
+             auto *element = resolve(workspace, cursor.ref);
+             const auto *entry = workspace.tree(active);
+             std::string id = element && isSubTree(*element) ? element->get("ID") : entry ? entry->id : "";
+             if (entry && id == entry->id && active != entry->id) {
+                 status("A mission's main tree has no ports", true);
+                 return;
+             }
+             ask(Dialog::EditPorts, id);
+         },
+         onTree});
+    add({"tree.delete", "Delete tree", "Tree", 0, false,
+         [this] {
+             const auto key = active;
+             if (editor.deleteTree(key)) {
+                 closeTree(key);
+                 status("Deleted " + key + " (removed from disk on save)");
+             } else
+                 status(editor.error(), true);
+         },
+         onTree});
+    add({"key.rename", "Rename variable…", "Tree", ImGuiKey_F2, false,
+         [this] {
+             if (!highlightKey.empty())
+                 ask(Dialog::RenameKey, active, highlightKey);
+             else if (cursor.ref.isTree())
+                 ask(Dialog::RenameTree, active, active);
+             else
+                 status("Pick a variable first (Variables panel, or $ in the finder)", true);
+         },
+         onTree});
+
+    // View
+    add({"view.finder", "Go to anything…", "View", ImGuiMod_Ctrl | ImGuiKey_P, false,
+         [this] {
+             showFinder = true;
+             finderPrefix.clear();
+         },
+         nullptr});
+    add({"view.commands", "Commands…", "View", ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_P, false,
+         [this] {
+             showFinder = true;
+             finderPrefix = ">";
+         },
+         nullptr});
+    add({"view.variables", "Go to variable…", "View", ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_V, false,
+         [this] {
+             showFinder = true;
+             finderPrefix = "$";
+         },
+         onTree});
+    add({"view.search", "Search this tree", "View", ImGuiMod_Ctrl | ImGuiKey_F, false,
+         [this] {
+             showSearch = true;
+             focusCanvas = false;
+         },
+         onTree});
+    add({"view.nextProblem", "Next problem", "View", ImGuiKey_F8, false,
+         [this] {
+             const auto &list = problems();
+             std::vector<const Problem *> located;
+             for (const auto &p : list)
+                 if (!p.node.empty() && p.severity != Severity::Note)
+                     located.push_back(&p);
+             if (located.empty()) {
+                 status("No problems");
+                 return;
+             }
+             std::size_t next = 0;
+             for (std::size_t i = 0; i < located.size(); ++i)
+                 if (located[i]->node == cursor.ref) {
+                     next = (i + 1) % located.size();
+                     break;
+                 }
+             reveal(located[next]->node);
+             status(std::string(severityName(located[next]->severity)) + ": " + located[next]->message,
+                    located[next]->severity == Severity::Error);
+         },
+         open});
+    add({"view.direction", "Toggle layout: top-down / left-right", "View", ImGuiMod_Ctrl | ImGuiKey_L, false,
+         [this] {
+             horizontal = !horizontal;
+             for (auto &[key, v] : views_)
+                 v.fit = true;
+         },
+         nullptr});
+    add({"view.fit", "Fit tree to view", "View", ImGuiMod_Ctrl | ImGuiKey_0, false, [this] { view(active).fit = true; },
+         onTree});
+    add({"view.unfoldAll", "Unfold everything", "View", 0, false, [this] { view(active).folded.clear(); }, onTree});
+    add({"view.closeTab", "Close tree tab", "View", ImGuiMod_Ctrl | ImGuiKey_F4, false, [this] { closeTree(active); },
+         onTree});
+    add({"view.nextTab", "Next tree tab", "View", ImGuiMod_Ctrl | ImGuiKey_PageDown, false,
+         [this] {
+             const auto found = std::find(tabs.begin(), tabs.end(), active);
+             if (found != tabs.end())
+                 openTree(*(found + 1 == tabs.end() ? tabs.begin() : found + 1));
+         },
+         onTree});
+    add({"view.previousTab", "Previous tree tab", "View", ImGuiMod_Ctrl | ImGuiKey_PageUp, false,
+         [this] {
+             const auto found = std::find(tabs.begin(), tabs.end(), active);
+             if (found != tabs.end())
+                 openTree(*(found == tabs.begin() ? tabs.end() - 1 : found - 1));
+         },
+         onTree});
+}
+} // namespace notgroot::ui

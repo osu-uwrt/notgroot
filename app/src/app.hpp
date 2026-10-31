@@ -1,6 +1,8 @@
 // The editor application: one window with the menu bar, a dockspace holding the panels, and the preferences
 // (theme, scale, layout, recent workspaces) kept in the config directory.
 #pragma once
+#include "file_picker.hpp"
+#include "notgroot/ui/session.hpp"
 #include "window.hpp"
 #include <filesystem>
 #include <memory>
@@ -25,8 +27,14 @@ class App {
   private:
     void frame();
     void menuBar();
+    void statusBar();
     void aboutWindow();
     void dockspace();
+    void defaultLayout(unsigned dock);
+    void openWorkspace(const std::filesystem::path &);
+    void updateTitle();
+    // Quits now, or asks first when trees have unsaved edits.
+    void quit();
 
     // Theme: --theme, else the theme picked here (notgroot.yaml), else Nereus's (nereus/viewer.yaml), else
     // timing-board. Changes apply between frames.
@@ -40,11 +48,17 @@ class App {
 
     Options opt_;
     std::unique_ptr<Window> window_;
+    ui::Session session_;
+    FilePicker picker_;
+    std::vector<std::string> recent_; // recently opened workspaces
+    bool closing_ = false;            // the user agreed to quit
+    double lastPoll_ = 0;
+    std::string title_;
     std::filesystem::path content_, config_;
     std::string pendingTheme_;
     bool pendingFollow_ = false, followNereus_ = true;
     float uiScale_ = 1, pendingScale_ = 0;
-    bool showAbout_ = false;
+    bool showAbout_ = false, resetLayout_ = false;
     unsigned logo_ = 0;
     int logoWidth_ = 0, logoHeight_ = 0;
     int frameCount_ = 0;

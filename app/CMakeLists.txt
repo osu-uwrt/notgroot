@@ -2,7 +2,8 @@
 add_executable(notgroot
   src/main.cpp
   src/app.cpp
-  src/window.cpp)
+  src/window.cpp
+  src/file_picker.cpp)
 target_link_libraries(notgroot PRIVATE notgroot_ui notgroot_imgui glfw OpenGL::GL GLEW::GLEW PNG::PNG
   Fontconfig::Fontconfig yaml-cpp)
 target_compile_definitions(notgroot PRIVATE NOTGROOT_CONTENT_DIR="${NOTGROOT_CONTENT_DIR}"
