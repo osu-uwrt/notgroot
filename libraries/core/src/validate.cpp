@@ -66,10 +66,18 @@ void checkNode(const Workspace &workspace, const Document &document, const Eleme
 
     // Children by category.
     const auto category = nodeCategory(node, catalog);
-    const int children = int(node.elements().size()), most = maxChildren(category), least = minChildren(category);
-    if (most >= 0 && children > most)
-        add(Severity::Error, id + (most == 0 ? " takes no children" : " takes one child"));
-    else if (children < least)
+    const int children = int(node.elements().size()), least = minChildren(category);
+    // Too many children: the extra ones are floating, and say so themselves.
+    if (isFloating(workspace, node)) {
+        const auto *parent = node.parent;
+        add(Severity::Error,
+            "floating: " +
+                (parent->tag == "BehaviorTree"                      ? std::string("a tree has one root")
+                 : maxChildren(nodeCategory(*parent, catalog)) == 0 ? nodeId(*parent) + " takes no children"
+                                                                    : nodeId(*parent) + " takes one child") +
+                "; move it on (Alt+arrows) before saving");
+    }
+    if (children < least)
         add(Severity::Error, id + (category == Category::Decorator ? " needs a child" : " needs at least one child"));
 
     // Ports.

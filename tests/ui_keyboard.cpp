@@ -275,3 +275,33 @@ TEST_F(Harness, SubtreesOpenInsideOpenedSubtrees) {
     press(ImGuiKey_DownArrow);
     EXPECT_NE(cursorId(), "RetryUntilSuccessfulV3");
 }
+
+// Alt+Down into a leaf floats the node; saving is refused (and names the tree) until it moves on.
+TEST_F(Harness, FloatingNodesBlockSaving) {
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_RightArrow); // Info, after the SetBlackboardV3 leaf
+    ASSERT_EQ(cursorId(), "Info");
+    press(ImGuiKey_DownArrow, ImGuiMod_Alt);
+    EXPECT_EQ(cursorId(), "Info");
+    EXPECT_EQ(session.cursor.ref.path.size(), 3u); // under the setter
+    ASSERT_EQ(core::floatingNodes(session.workspace, "Toy.xml").size(), 1u);
+
+    std::string before;
+    ASSERT_TRUE(core::readFile(copy.path() / "Toy.xml", before));
+    press(ImGuiKey_S, ImGuiMod_Ctrl);
+    EXPECT_EQ(session.dialog.kind, ui::Session::Dialog::Floating);
+    EXPECT_EQ(session.floating.front().tree, "Toy.xml");
+    std::string after;
+    ASSERT_TRUE(core::readFile(copy.path() / "Toy.xml", after));
+    EXPECT_EQ(after, before);
+    press(ImGuiKey_Escape);
+    frames(3);
+
+    // Alt+Up lands it back beside the setter; now it saves.
+    press(ImGuiKey_UpArrow, ImGuiMod_Alt);
+    EXPECT_TRUE(core::floatingNodes(session.workspace, "Toy.xml").empty());
+    press(ImGuiKey_S, ImGuiMod_Ctrl);
+    EXPECT_EQ(session.dialog.kind, ui::Session::Dialog::None);
+    EXPECT_FALSE(session.dirty());
+}

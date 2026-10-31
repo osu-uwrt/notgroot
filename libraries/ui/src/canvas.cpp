@@ -29,6 +29,7 @@ struct Card {
     const Element *element = nullptr;
     Category category = Category::Unknown;
     bool root = false, call = false, opened = false, folded = false;
+    bool floating = false; // where its parent can't hold it (a keyboard move on its way)
     std::string title, subtitle, comment;
     std::string color; // a subtree's own color (#rrggbb), for its calls and its root card
     Accent accent;     // Groot's accent and icon for its type
@@ -119,6 +120,7 @@ void describe(Session &session, Card &card, const Element &element) {
     card.title = id;
     card.subtitle = element.get("name");
     card.category = nodeCategory(element, catalog);
+    card.floating = isFloating(session.workspace, element);
     card.accent = nodeAccent(card.call ? "SubTree" : id, card.category);
     if (card.call)
         card.color = treeColor(session.workspace, id);
@@ -154,6 +156,8 @@ float iconRoom(const Card &card, const Metrics &m) {
 
 void measure(Card &card, const Metrics &m) {
     float width = iconRoom(card, m) + textWidth(m.title, card.title);
+    if (!card.comment.empty())
+        width += m.pad + textWidth(m.body, "//");
     if (!card.subtitle.empty())
         width = std::max(width, textWidth(m.body, card.subtitle));
     const float badge = textWidth(m.body, "OUT") + m.pad;
@@ -312,15 +316,17 @@ Scene &scene(Session &session) {
 
 // --- drawing ---
 
+void dashedLine(ImDrawList *draw, ImVec2 p, ImVec2 q, ImU32 color, float thickness, float dash) {
+    const float length = std::hypot(q.x - p.x, q.y - p.y);
+    for (float t = 0; t < length; t += 2 * dash) {
+        const float e = std::min(t + dash, length);
+        draw->AddLine({p.x + (q.x - p.x) * t / length, p.y + (q.y - p.y) * t / length},
+                      {p.x + (q.x - p.x) * e / length, p.y + (q.y - p.y) * e / length}, color, thickness);
+    }
+}
+
 void dashedRect(ImDrawList *draw, ImVec2 a, ImVec2 b, ImU32 color, float thickness, float dash) {
-    const auto line = [&](ImVec2 p, ImVec2 q) {
-        const float length = std::hypot(q.x - p.x, q.y - p.y);
-        for (float t = 0; t < length; t += 2 * dash) {
-            const float e = std::min(t + dash, length);
-            draw->AddLine({p.x + (q.x - p.x) * t / length, p.y + (q.y - p.y) * t / length},
-                          {p.x + (q.x - p.x) * e / length, p.y + (q.y - p.y) * e / length}, color, thickness);
-        }
-    };
+    const auto line = [&](ImVec2 p, ImVec2 q) { dashedLine(draw, p, q, color, thickness, dash); };
     line(a, {b.x, a.y});
     line({b.x, a.y}, b);
     line(b, {a.x, b.y});
@@ -431,12 +437,22 @@ void drawEdges(const Scene &scene, const View &view, ImDrawList *draw, bool hori
                 const ImVec2 from{p1.x, (p0.y + p1.y) / 2}, to{c0.x, (c0.y + c1.y) / 2};
                 const float mid = std::max(from.x, to.x - levelGap(true) * view.zoom / 2);
                 const ImVec2 points[] = {from, {mid, from.y}, {mid, to.y}, to};
-                draw->AddPolyline(points, 4, ink, 0, thickness);
+                if (child.floating)
+                    for (int k = 0; k < 3; ++k)
+                        dashedLine(draw, points[k], points[k + 1], ImGui::GetColorU32(palette().warn), thickness,
+                                   ui(3) * view.zoom);
+                else
+                    draw->AddPolyline(points, 4, ink, 0, thickness);
             } else {
                 const ImVec2 from{(p0.x + p1.x) / 2, p1.y}, to{(c0.x + c1.x) / 2, c0.y};
                 const float mid = std::max(from.y, to.y - levelGap(false) * view.zoom / 2);
                 const ImVec2 points[] = {from, {from.x, mid}, {to.x, mid}, to};
-                draw->AddPolyline(points, 4, ink, 0, thickness);
+                if (child.floating)
+                    for (int k = 0; k < 3; ++k)
+                        dashedLine(draw, points[k], points[k + 1], ImGui::GetColorU32(palette().warn), thickness,
+                                   ui(3) * view.zoom);
+                else
+                    draw->AddPolyline(points, 4, ink, 0, thickness);
             }
         }
     }
@@ -534,7 +550,12 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
 
     // Outline: subtree calls dashed; cursor, selection, search hits, problems and the highlighted key.
     const ImU32 edge = ImGui::GetColorU32(withAlpha(band, .9f * alpha));
-    if (card.call)
+    if (card.floating) {
+        // Dotted in the warning color, tagged: it can't stay here.
+        dashedRect(draw, a, b, ImGui::GetColorU32(palette().warn), std::max(1.5f, ui(2) * z), ui(3) * z);
+        text(draw, view.body, view.bodySize, {a.x, a.y - view.bodySize - ui(3) * z}, ImGui::GetColorU32(palette().warn),
+             "floating");
+    } else if (card.call)
         dashedRect(draw, a, b, edge, std::max(1.f, ui(1.5f) * z), ui(5) * z);
     else
         draw->AddRect(a, b, ImGui::GetColorU32(withAlpha(style.Colors[ImGuiCol_Border], alpha)), rounding, 0,
@@ -543,7 +564,7 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
         draw->AddRect({a.x - grow, a.y - grow}, {b.x + grow, b.y + grow}, ImGui::GetColorU32(color), rounding + grow, 0,
                       width);
     };
-    if (severity == 0 || severity == 1)
+    if ((severity == 0 || severity == 1) && !card.floating)
         ring(severityColor(severity), std::max(1.5f, ui(2) * z), ui(1) * z);
     if (keyed)
         ring(keyColor(session.highlightKey), std::max(1.5f, ui(2) * z), ui(3) * z);

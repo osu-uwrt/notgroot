@@ -476,11 +476,12 @@ void drawDialogs(Session &session) {
                             "Rename variable",
                             "Extract to subtree",
                             "Subtree ports",
-                            "Unsaved changes"};
+                            "Unsaved changes",
+                            "Can't save: floating nodes"};
     if (dialog.kind != Session::Dialog::None && !ImGui::IsPopupOpen(titles[dialog.kind]))
         ImGui::OpenPopup(titles[dialog.kind]);
 
-    for (int kind = 1; kind <= Session::Dialog::Unsaved; ++kind) {
+    for (int kind = 1; kind <= Session::Dialog::Floating; ++kind) {
         ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, {.5f, .5f});
         if (!ImGui::BeginPopupModal(titles[kind], nullptr, ImGuiWindowFlags_AlwaysAutoResize))
             continue;
@@ -573,6 +574,40 @@ void drawDialogs(Session &session) {
             }
             ImGui::SameLine();
             if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
+                close = true;
+            break;
+        }
+        case Session::Dialog::Floating: {
+            ImGui::TextUnformatted("Nothing was saved. These trees have nodes where their parent can't hold them;");
+            ImGui::TextUnformatted("move each on (Alt+arrows) and save again.");
+            ImGui::Spacing();
+            std::vector<std::string> trees;
+            for (const auto &ref : session.floating)
+                if (std::find(trees.begin(), trees.end(), ref.tree) == trees.end())
+                    trees.push_back(ref.tree);
+            for (const auto &tree : trees) {
+                int count = 0;
+                for (const auto &ref : session.floating)
+                    count += ref.tree == tree;
+                // A link: opens the tree with the cursor on its first floating node.
+                ImGui::PushStyleColor(ImGuiCol_Text, palette().accent);
+                const bool go = ImGui::Selectable(tree.c_str(), false, 0, {ImGui::CalcTextSize(tree.c_str()).x, 0});
+                ImGui::PopStyleColor();
+                if (ImGui::IsItemHovered())
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                ImGui::SameLine();
+                ImGui::TextDisabled("%d floating", count);
+                if (go) {
+                    for (const auto &ref : session.floating)
+                        if (ref.tree == tree) {
+                            session.reveal(ref);
+                            break;
+                        }
+                    close = true;
+                }
+            }
+            ImGui::Spacing();
+            if (ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape))
                 close = true;
             break;
         }

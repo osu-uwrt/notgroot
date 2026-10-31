@@ -3,6 +3,7 @@
 #include "notgroot/core/variables.hpp"
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <set>
 
 namespace notgroot::core {
@@ -81,6 +82,36 @@ std::unique_ptr<Element> makeNode(const NodeModel &model) {
             node->set(port.name, port.defaultValue);
     }
     return node;
+}
+
+bool isFloating(const Workspace &workspace, const Element &node) {
+    if (!node.parent || node.isComment())
+        return false;
+    const auto siblings = nodeChildren(*node.parent);
+    const auto at = std::size_t(std::find(siblings.begin(), siblings.end(), &node) - siblings.begin());
+    const int most =
+        node.parent->tag == "BehaviorTree" ? 1 : maxChildren(nodeCategory(*node.parent, workspace.catalog()));
+    return most >= 0 && int(at) >= most;
+}
+
+std::vector<NodeRef> floatingNodes(const Workspace &workspace, const std::string &tree) {
+    std::vector<NodeRef> found;
+    const auto *entry = workspace.tree(tree);
+    if (!entry)
+        return found;
+    const std::function<void(const Element &, const NodeRef &)> visit = [&](const Element &element,
+                                                                            const NodeRef &ref) {
+        for (std::size_t i = 0; i < element.children.size(); ++i) {
+            const auto &child = *element.children[i];
+            if (child.isComment())
+                continue;
+            if (isFloating(workspace, child))
+                found.push_back(ref.child(i));
+            visit(child, ref.child(i));
+        }
+    };
+    visit(*entry->tree, {tree, {}});
+    return found;
 }
 
 bool acceptsChild(const Workspace &workspace, const Element &parent, bool adding) {
@@ -341,7 +372,7 @@ NodeRef Editor::move(const NodeRef &ref, int delta) {
     return refOf(workspace_, insertBlock(*parent, childIndexFor(*parent, to), std::move(block)));
 }
 
-NodeRef Editor::relocate(std::vector<NodeRef> refs, const NodeRef &parentRef, std::size_t nodeIndex) {
+NodeRef Editor::relocate(std::vector<NodeRef> refs, const NodeRef &parentRef, std::size_t nodeIndex, bool floating) {
     refs = outermost(refs);
     auto *parent = resolve(workspace_, parentRef);
     if (refs.empty() || !parent)
@@ -362,7 +393,7 @@ NodeRef Editor::relocate(std::vector<NodeRef> refs, const NodeRef &parentRef, st
     const auto siblings = nodeChildren(*parent);
     const int count = int(siblings.size()) + arriving;
     const int most = parent->tag == "BehaviorTree" ? 1 : maxChildren(nodeCategory(*parent, workspace_.catalog()));
-    if (most >= 0 && count > most)
+    if (!floating && most >= 0 && count > most)
         return fail((parent->tag == "BehaviorTree" ? std::string("a tree") : nodeId(*parent)) + " cannot take " +
                     (arriving > 1 ? "these children" : "another child")),
                NodeRef();
@@ -395,7 +426,7 @@ NodeRef Editor::relocate(std::vector<NodeRef> refs, const NodeRef &parentRef, st
     return refOf(workspace_, first);
 }
 
-NodeRef Editor::indent(const NodeRef &ref) {
+NodeRef Editor::indent(const NodeRef &ref, bool floating) {
     auto *element = resolve(workspace_, ref);
     if (!element || ref.isTree())
         return {};
@@ -404,7 +435,7 @@ NodeRef Editor::indent(const NodeRef &ref) {
     if (at == 0)
         return fail("no node before this one to move it into"), NodeRef();
     Element *into = siblings[at - 1];
-    if (!acceptsChild(workspace_, *into))
+    if (!floating && !acceptsChild(workspace_, *into))
         return fail(nodeId(*into) + " cannot take another child"), NodeRef();
     Change change(history_, "Move into previous");
     change.touch(*documentOf(workspace_, ref));
@@ -412,12 +443,12 @@ NodeRef Editor::indent(const NodeRef &ref) {
     return refOf(workspace_, insertBlock(*into, into->children.size(), std::move(block)));
 }
 
-NodeRef Editor::outdent(const NodeRef &ref) {
+NodeRef Editor::outdent(const NodeRef &ref, bool floating) {
     auto *element = resolve(workspace_, ref);
     if (!element || ref.path.size() < 2)
         return fail("already at the top of the tree"), NodeRef();
     Element *parent = element->parent, *grand = parent->parent;
-    if (!acceptsChild(workspace_, *grand))
+    if (!floating && !acceptsChild(workspace_, *grand))
         return fail((grand->tag == "BehaviorTree" ? std::string("the tree") : nodeId(*grand)) +
                     " cannot take another child"),
                NodeRef();

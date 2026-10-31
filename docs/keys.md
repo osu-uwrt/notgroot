@@ -79,6 +79,10 @@ Wrap and extract work on nodes under one parent; delete, copy, cut and duplicate
 | Alt + ← / → | move the node earlier / later among its siblings |
 | Alt + ↑ | move the node out of its parent, right after it |
 | Alt + ↓ | move the node into the previous sibling, as its last child |
+
+Alt+↑ and Alt+↓ always move. Where the new parent can't hold the node (a leaf, a decorator that already has its
+child, a tree's second root) the node *floats* there: drawn dotted, with a dotted edge, ready to move on. Saving is
+refused while any node floats; the message lists the trees, and clicking one goes to its floating node.
 | Delete | delete the selection (and the comments right above each node) |
 | Ctrl+X / Ctrl+C / Ctrl+V | cut / copy / paste nodes. Paste goes into the cursor's node, else after it. The clipboard is plain XML, so trees from a text editor or Groot paste too |
 | Ctrl+D | duplicate the selection |

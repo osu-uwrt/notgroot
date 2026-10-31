@@ -78,7 +78,9 @@ saving writes only the files you changed. Includes are recomputed on save, so yo
   On every save (and on F7), every mission is loaded by BehaviorTree.CPP 4.10 itself, through `notgroot-check`, and
   anything it rejects shows up here. You can also run `build/release/tools/check/notgroot-check trees/` from a shell
   or CI.
-- **Refactors.** Rename a tree (its file follows), rename a key, edit a subtree's ports (calls follow), and extract
+- **Moving by keyboard.** Alt+arrows always move a node. Where its new parent can't hold it, it floats there, drawn
+  dotted, until you move it on; nothing is saved while a node floats.
+- **Refactors. Rename a tree (its file follows), rename a key, edit a subtree's ports (calls follow), and extract
   the selection into a new subtree (ports inferred from the keys it uses). Each refactor is one undo step, however
   many files it touches.
 - **Disk.** A file changed on disk reloads by itself. If it also has unsaved edits, notgroot asks which version to

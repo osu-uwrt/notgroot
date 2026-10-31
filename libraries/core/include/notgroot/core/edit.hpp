@@ -47,6 +47,11 @@ std::unique_ptr<Element> makeNode(const NodeModel &);
 bool acceptsChild(const Workspace &, const Element &parent, bool adding = true);
 // Child elements that are nodes (no comments), and a node's position among them.
 std::vector<Element *> nodeChildren(const Element &);
+// A node is floating where its parent can't hold it (a leaf's child, a decorator's second child, a tree's second
+// root): keyboard moves may leave it there on the way somewhere else, and the tree can't be saved until it lands.
+bool isFloating(const Workspace &, const Element &node);
+// The floating nodes of one tree.
+std::vector<NodeRef> floatingNodes(const Workspace &, const std::string &tree);
 
 // The nodes of a selection that are not inside another selected node, in document order (no trees, no repeats).
 std::vector<NodeRef> outermost(std::vector<NodeRef>);
@@ -74,14 +79,15 @@ class Editor {
                        const std::string &label); // returns the first
     NodeRef insertAfter(const NodeRef &sibling, std::unique_ptr<Element>, const std::string &label);
     bool remove(std::vector<NodeRef>);
-    NodeRef move(const NodeRef &, int delta); // among siblings
-    NodeRef indent(const NodeRef &);          // into the previous sibling, as its last child
-    NodeRef outdent(const NodeRef &);         // out of its parent, right after it
+    // `floating`: go there even where the parent can't hold it (isFloating), instead of refusing.
+    NodeRef move(const NodeRef &, int delta);                // among siblings
+    NodeRef indent(const NodeRef &, bool floating = false);  // into the previous sibling, as its last child
+    NodeRef outdent(const NodeRef &, bool floating = false); // out of its parent, right after it
     NodeRef wrap(const std::vector<NodeRef> &siblings, const NodeModel &with);
     NodeRef unwrap(const NodeRef &); // replaces a node by its children
     // Moves nodes (the outermost of them, kept in document order, with their comments) under `parent`, before what
     // is now its nodeIndex-th child; one tree only. Returns the first moved node.
-    NodeRef relocate(std::vector<NodeRef>, const NodeRef &parent, std::size_t nodeIndex);
+    NodeRef relocate(std::vector<NodeRef>, const NodeRef &parent, std::size_t nodeIndex, bool floating = false);
     NodeRef retype(const NodeRef &, const NodeModel &to);
 
     bool setAttribute(const NodeRef &, const std::string &name, const std::string &value);

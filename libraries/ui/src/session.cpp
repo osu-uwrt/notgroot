@@ -48,6 +48,17 @@ bool Session::dirty() const {
 }
 
 void Session::save() {
+    // Nothing is written while a node floats: the files would not load.
+    floating.clear();
+    for (const auto &[key, entry] : workspace.trees()) {
+        const auto found = floatingNodes(workspace, key);
+        floating.insert(floating.end(), found.begin(), found.end());
+    }
+    if (!floating.empty()) {
+        ask(Dialog::Floating);
+        status("Not saved: nodes are floating", true);
+        return;
+    }
     std::vector<std::string> errors;
     const auto written = workspace.save(errors);
     if (!errors.empty()) {
@@ -563,10 +574,21 @@ void Session::registerCommands() {
          [this] { edited(editor.move(cursor.ref, -1)); }, onNode});
     add({"node.later", "Move later among siblings", "Node", 0, false, [this] { edited(editor.move(cursor.ref, 1)); },
          onNode});
-    add({"node.outdent", "Move out of the parent", "Node", 0, false, [this] { edited(editor.outdent(cursor.ref)); },
-         onNode});
+    // Moving out of or into a node never refuses for lack of room: the node floats there until it moves on.
+    const auto landed = [this](const NodeRef &made) {
+        edited(made);
+        if (const auto *element = made.empty() ? nullptr : resolve(workspace, made);
+            element && isFloating(workspace, *element))
+            status("Floating: " +
+                       (element->parent->tag == "BehaviorTree" ? std::string("a tree has one root")
+                                                               : nodeId(*element->parent) + " can't hold it") +
+                       "; keep moving it (Alt+arrows)",
+                   true);
+    };
+    add({"node.outdent", "Move out of the parent", "Node", 0, false,
+         [this, landed] { landed(editor.outdent(cursor.ref, true)); }, onNode});
     add({"node.indent", "Move into the previous sibling", "Node", 0, false,
-         [this] { edited(editor.indent(cursor.ref)); }, onNode});
+         [this, landed] { landed(editor.indent(cursor.ref, true)); }, onNode});
     add({"node.edit", "Edit the node's ports", "Node", ImGuiKey_Enter, true,
          [this] {
              focusInspector = true;

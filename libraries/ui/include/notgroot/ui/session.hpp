@@ -140,13 +140,14 @@ class Session {
     bool showShortcuts = false; // the keyboard guide (F1)
     std::string search;
     struct Dialog {
-        enum Kind { None, NewSubtree, NewMission, RenameTree, RenameKey, ExtractSubtree, EditPorts, Unsaved };
+        enum Kind { None, NewSubtree, NewMission, RenameTree, RenameKey, ExtractSubtree, EditPorts, Unsaved, Floating };
         Kind kind = None;
         std::string target, text;
         bool fresh = true;
     } dialog;
     void ask(Dialog::Kind, std::string target = {}, std::string text = {});
-    std::function<void()> afterUnsaved; // what Save / Discard in the unsaved-changes dialog goes on to
+    std::function<void()> afterUnsaved;  // what Save / Discard in the unsaved-changes dialog goes on to
+    std::vector<core::NodeRef> floating; // what stopped the last save (the Floating dialog lists their trees)
 
     // --- status line ---
     void status(std::string text, bool error = false);
