@@ -1,5 +1,6 @@
 // Editor: the structural and refactoring edits, each one History step.
 #include "notgroot/core/edit.hpp"
+#include "notgroot/core/globals.hpp"
 #include "notgroot/core/variables.hpp"
 #include <algorithm>
 #include <cctype>
@@ -89,8 +90,7 @@ bool isFloating(const Workspace &workspace, const Element &node) {
         return false;
     const auto siblings = nodeChildren(*node.parent);
     const auto at = std::size_t(std::find(siblings.begin(), siblings.end(), &node) - siblings.begin());
-    const int most =
-        node.parent->tag == "BehaviorTree" ? 1 : maxChildren(nodeCategory(*node.parent, workspace.catalog()));
+    const int most = capacity(workspace.catalog(), *node.parent);
     return most >= 0 && int(at) >= most;
 }
 
@@ -103,9 +103,9 @@ std::vector<NodeRef> floatingNodes(const Workspace &workspace, const std::string
                                                                             const NodeRef &ref) {
         for (std::size_t i = 0; i < element.children.size(); ++i) {
             const auto &child = *element.children[i];
-            if (child.isComment())
+            if (child.isComment() || (child.tag == "Script" && isGlobalsPart(child)))
                 continue;
-            if (isFloating(workspace, child))
+            if (isFloating(workspace, child) && !isGlobalsPart(child))
                 found.push_back(ref.child(i));
             visit(child, ref.child(i));
         }
@@ -115,10 +115,10 @@ std::vector<NodeRef> floatingNodes(const Workspace &workspace, const std::string
 }
 
 bool acceptsChild(const Workspace &workspace, const Element &parent, bool adding) {
-    const auto count = int(nodeChildren(parent).size()) + (adding ? 1 : 0);
-    if (parent.tag == "BehaviorTree")
-        return count <= 1;
-    const int most = maxChildren(nodeCategory(parent, workspace.catalog()));
+    // A tree with globals holds its root in the globals wrapper.
+    const Element &holder = parent.tag == "BehaviorTree" ? *treeBody(parent) : parent;
+    const auto count = int(nodeChildren(holder).size()) + (adding ? 1 : 0);
+    const int most = capacity(workspace.catalog(), holder);
     return most < 0 || count <= most;
 }
 
@@ -308,10 +308,15 @@ NodeRef Editor::insertMany(const NodeRef &parentRef, std::size_t nodeIndex, std:
     auto *parent = resolve(workspace_, parentRef);
     if (!parent || nodes.empty())
         return fail("nothing to insert there"), NodeRef();
+    // Into the tree: into the globals wrapper when there is one, after its Script.
+    if (parentRef.isTree() && treeBody(*parent) != parent) {
+        parent = treeBody(*parent);
+        nodeIndex += 1;
+    }
     const auto existing = nodeChildren(*parent).size();
-    const int most = parent->tag == "BehaviorTree" ? 1 : maxChildren(nodeCategory(*parent, workspace_.catalog()));
+    const int most = capacity(workspace_.catalog(), *parent);
     if (most >= 0 && existing + nodes.size() > std::size_t(most))
-        return fail(parent->tag == "BehaviorTree"
+        return fail(parent->tag == "BehaviorTree" || isGlobalsPart(*parent)
                         ? "a tree has one root node"
                         : nodeId(*parent) + " takes " + std::to_string(most) + (most == 1 ? " child" : " children")),
                NodeRef();
@@ -377,6 +382,10 @@ NodeRef Editor::relocate(std::vector<NodeRef> refs, const NodeRef &parentRef, st
     auto *parent = resolve(workspace_, parentRef);
     if (refs.empty() || !parent)
         return fail("nothing to move"), NodeRef();
+    if (parentRef.isTree() && treeBody(*parent) != parent) {
+        parent = treeBody(*parent);
+        nodeIndex += 1;
+    }
     std::vector<Element *> moving;
     int arriving = 0;
     for (const auto &ref : refs) {
@@ -392,7 +401,7 @@ NodeRef Editor::relocate(std::vector<NodeRef> refs, const NodeRef &parentRef, st
     }
     const auto siblings = nodeChildren(*parent);
     const int count = int(siblings.size()) + arriving;
-    const int most = parent->tag == "BehaviorTree" ? 1 : maxChildren(nodeCategory(*parent, workspace_.catalog()));
+    const int most = capacity(workspace_.catalog(), *parent);
     if (!floating && most >= 0 && count > most)
         return fail((parent->tag == "BehaviorTree" ? std::string("a tree") : nodeId(*parent)) + " cannot take " +
                     (arriving > 1 ? "these children" : "another child")),
@@ -492,7 +501,7 @@ NodeRef Editor::unwrap(const NodeRef &ref) {
         return fail("nothing inside to keep"), NodeRef();
     Element *parent = element->parent;
     const auto total = nodeChildren(*parent).size() - 1 + children.size();
-    const int most = parent->tag == "BehaviorTree" ? 1 : maxChildren(nodeCategory(*parent, workspace_.catalog()));
+    const int most = capacity(workspace_.catalog(), *parent);
     if (most >= 0 && total > std::size_t(most))
         return fail("the parent cannot take " + std::to_string(children.size()) + " children"), NodeRef();
     Change change(history_, "Unwrap " + nodeId(*element));
@@ -623,6 +632,26 @@ int Editor::renameKey(const std::string &treeKey, const std::string &from, const
                 port.name = to;
         if (setSubtreePorts(entry->id, ports, {{from, to}}))
             ++changed;
+    }
+    // Globals: the name, and the {key} mentions in their values.
+    auto globals = readGlobals(*entry->tree).globals;
+    bool renamed = false;
+    for (auto &global : globals) {
+        if (global.name == from)
+            global.name = to, renamed = true;
+        for (std::size_t at = global.value.find("{" + from + "}"); at != std::string::npos;
+             at = global.value.find("{" + from + "}", at + to.size() + 2)) {
+            global.value.replace(at, from.size() + 2, "{" + to + "}");
+            renamed = true;
+        }
+    }
+    if (renamed) {
+        if (!setGlobals(treeKey, globals)) {
+            const auto why = error_;
+            history_.cancel();
+            return fail(why), 0;
+        }
+        ++changed;
     }
     history_.commit();
     return changed;
@@ -901,6 +930,126 @@ bool Editor::setSubtreePorts(const std::string &id, const std::vector<PortModel>
         change.touch(*entry->document);
         for (const auto &[from, to] : renamed)
             renameKeyIn(workspace_, *entry->tree, from, to);
+    }
+    return true;
+}
+bool Editor::setGlobals(const std::string &treeKey, std::vector<Global> globals) {
+    cycles_.clear();
+    const auto *entry = workspace_.tree(treeKey);
+    if (!entry)
+        return fail("no tree " + treeKey);
+    const auto inputs = treeKey == entry->id ? workspace_.subtreeModel(entry->id).ports : std::vector<PortModel>{};
+    for (std::size_t i = 0; i < globals.size(); ++i) {
+        if (const auto problem = globalProblem(globals[i]); !problem.empty())
+            return fail(problem);
+        for (std::size_t j = 0; j < i; ++j)
+            if (globals[j].name == globals[i].name)
+                return fail("two globals named " + globals[i].name);
+        for (const auto &port : inputs)
+            if (port.name == globals[i].name)
+                return fail(globals[i].name + " is an input of " + entry->id + "; a global can't take its name");
+    }
+    std::vector<std::vector<std::string>> cycles;
+    const auto ordered = orderGlobals(globals, cycles);
+    if (!cycles.empty()) {
+        cycles_ = cycles;
+        std::string names;
+        for (const auto &name : cycles.front())
+            names += (names.empty() ? "" : ", ") + name;
+        return fail("these globals use each other in a circle: " + names);
+    }
+
+    auto *tree = entry->tree;
+    auto existing = readGlobals(*tree);
+    if (existing.globals == ordered && (existing.wrapper || ordered.empty()))
+        return true;
+    Change change(history_, "Set globals");
+    change.touch(*documentOf(workspace_, {treeKey, {}}));
+    if (ordered.empty()) {
+        // The last one gone: the wrapper goes, its root back under the tree.
+        auto at = existing.wrapper->index();
+        tree->remove(at - 1); // the marker
+        auto wrapper = tree->remove(at - 1);
+        wrapper->remove(existing.script->index());
+        while (!wrapper->children.empty())
+            tree->insert(at++ - 1, wrapper->remove(0));
+        return true;
+    }
+    if (!existing.wrapper) {
+        // The first one: everything under the tree moves into the wrapper, after its Script.
+        auto wrapper = std::make_unique<Element>("Sequence");
+        wrapper->set("name", "globals");
+        wrapper->append(std::make_unique<Element>("Script"))->set("code", "");
+        while (!tree->children.empty())
+            wrapper->append(tree->remove(0));
+        tree->append(Element::comment(" notgroot:globals "));
+        tree->append(std::move(wrapper));
+        existing = readGlobals(*tree);
+        // An empty code isn't one notgroot wrote, so find the Script by hand.
+        existing.script = tree->elements().front()->elements().front();
+    }
+    existing.script->set("code", scriptFor(ordered));
+    return true;
+}
+
+bool Editor::makeGlobal(const NodeRef &ref, bool strict) {
+    auto *element = resolve(workspace_, ref);
+    if (!element || ref.isTree())
+        return fail("not a node");
+    Global global;
+    const auto id = nodeId(*element);
+    if (id == "SetBlackboardV3") {
+        global.name = element->get("output_key");
+        global.value = element->get("value");
+        // SetBlackboardV3 stores text as written; a global would read {k} inside text as a key.
+        const bool copy = isKeyReference(global.value) && valueKeys(global.value).size() == 1;
+        if (!copy && global.value.find_first_of("{}") != std::string::npos)
+            return fail("its value holds { } text, which a global would read as keys");
+        if (isKeyReference(global.name))
+            return fail("its output_key names the key indirectly");
+    } else if (id == "Format") {
+        if (!isKeyReference(element->get("out")))
+            return fail("its out port stores nothing");
+        global = {keyOf(element->get("out")), element->get("format")};
+    } else
+        return fail("only SetBlackboardV3 and Format nodes can become globals");
+    if (const auto problem = globalProblem(global); !problem.empty())
+        return fail(problem);
+
+    // Set only here, and read nowhere before it (uses come in document order).
+    const auto variables = analyzeVariables(workspace_, ref.tree);
+    const auto found = variables.keys.find(global.name);
+    if (found == variables.keys.end() || found->second.writes != 1)
+        return fail(global.name + " is set somewhere else too");
+    if (found->second.uses.front().node != ref)
+        return fail(global.name + " is read before this node sets it");
+    // What it is made of has to exist before the tree runs: inputs and other globals.
+    auto globals = readGlobals(*workspace_.tree(ref.tree)->tree).globals;
+    for (const auto &key : valueKeys(global.value)) {
+        const auto info = variables.keys.find(key);
+        const bool known = std::any_of(globals.begin(), globals.end(), [&](auto &g) { return g.name == key; }) ||
+                           (info != variables.keys.end() && info->second.port);
+        if (!known)
+            return fail(key + " is not an input or a global, so it isn't there before the tree runs");
+    }
+    if (strict) {
+        // Runs whenever the tree does: nothing but Sequences above it, and its parent keeps another child.
+        const auto *body = treeBody(*workspace_.tree(ref.tree)->tree);
+        for (const auto *up = element->parent; up && up != body; up = up->parent)
+            if (up->tag != "Sequence" && up->tag != "SequenceWithMemory" && up->tag != "ReactiveSequence")
+                return fail("it doesn't run every time the tree does (" + nodeId(*up) + " above it)");
+        if (nodeChildren(*element->parent).size() < 2)
+            return fail("its parent would be left empty");
+    }
+
+    Change change(history_, "Make " + global.name + " global");
+    change.touch(*documentOf(workspace_, ref));
+    element->detach(); // only the node: comments above it stay where they were written
+    globals.push_back(global);
+    if (!setGlobals(ref.tree, globals)) {
+        const auto why = error_;
+        change.cancel(); // the node comes back
+        return fail(why);
     }
     return true;
 }

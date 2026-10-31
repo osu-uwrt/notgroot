@@ -5,6 +5,9 @@
 #include "notgroot/ui/theme.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
+#include <cstdio>
+#include <map>
 
 namespace notgroot::ui {
 using namespace core;
@@ -195,101 +198,172 @@ void drawVariables(Session &session) {
         emptyState("Open a tree to see its blackboard keys.");
         return;
     }
+    const auto *entry = session.workspace.tree(session.active);
+    if (!entry)
+        return;
     static std::string filter;
     filterBox("##variables", "Filter keys", filter);
-    ImGui::TextDisabled("(F2 renames the highlighted key)");
+    const auto &variables = session.variables(session.active);
+    std::vector<const KeyInfo *> inputs, globals, locals;
+    for (const auto &[name, key] : variables.keys)
+        if (fuzzyMatch(filter, name).matched)
+            (key.scope == Scope::Input ? inputs : key.scope == Scope::Global ? globals : locals).push_back(&key);
+    const float detail = session.highlightKey.empty() ? 0 : ui(170);
+    ImGui::BeginChild("##sections", {0, -detail});
 
-    // Declare: a SetBlackboardV3 just before the cursor (the trees' setter: BT.CPP 4.10's SetBlackboard empties a key
-    // an untyped port declared).
-    static std::string declare;
-    ImGui::SetNextItemWidth(ui(180));
-    const bool enter = inputStringWithHint("##declare", "new key", declare, ImGuiInputTextFlags_EnterReturnsTrue);
-    ImGui::SameLine();
-    if ((ImGui::Button("Declare") || enter) && !declare.empty()) {
-        NodeModel setter;
-        if (session.model("SetBlackboardV3", setter) || session.model("SetBlackboard", setter)) {
-            auto node = makeNode(setter);
-            node->set("output_key", declare);
-            node->set("value", "");
-            auto *at = resolve(session.workspace, session.cursor.ref);
-            NodeRef made;
-            if (session.cursor.readOnly() || !at)
-                session.status("Put the cursor in this tree first", true);
-            else if (session.cursor.ref.isTree() || session.cursor.ref.path.size() == 1) {
-                // On the tree or its root node: first child of the root node.
-                const auto roots = nodeChildren(*resolve(session.workspace, {session.active, {}}));
-                if (roots.empty())
-                    session.status("The tree is empty: add its root node first (Tab)", true);
-                else
-                    made = session.editor.insert(refOf(session.workspace, roots.front()), 0, std::move(node),
-                                                 "Declare " + declare);
-            } else {
-                const auto siblings = nodeChildren(*at->parent);
-                const auto index = std::size_t(std::find(siblings.begin(), siblings.end(), at) - siblings.begin());
-                made = session.editor.insert(session.cursor.ref.parent(), index, std::move(node), "Declare " + declare);
+    // A key's name: its color, a click highlights it, a double-click goes to its first use, F2 renames it.
+    const auto keyCell = [&](const KeyInfo &key) {
+        chip(keyColor(key.name));
+        const bool circular =
+            std::find(session.globalCycle.begin(), session.globalCycle.end(), key.name) != session.globalCycle.end();
+        if (circular)
+            ImGui::PushStyleColor(ImGuiCol_Text, palette().error);
+        if (ImGui::Selectable(("{" + key.name + "}##" + key.name).c_str(), session.highlightKey == key.name,
+                              ImGuiSelectableFlags_AllowDoubleClick)) {
+            session.highlightKey = session.highlightKey == key.name ? "" : key.name;
+            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !key.uses.empty()) {
+                session.highlightKey = key.name;
+                session.reveal(key.uses.front().node);
             }
-            session.edited(made);
-            if (!made.empty()) {
-                session.highlightKey = declare;
-                session.focusInspector = true;
-                session.focusPort = "value";
-                session.focusCanvas = false;
-                declare.clear();
+        }
+        if (circular) {
+            ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Part of a circle of globals that use each other");
+        }
+        if (ImGui::BeginPopupContextItem()) {
+            if (ImGui::MenuItem("Rename…", "F2"))
+                session.ask(Session::Dialog::RenameKey, session.active, key.name);
+            if (ImGui::MenuItem("Go to first use", nullptr, false, !key.uses.empty()))
+                session.reveal(key.uses.front().node);
+            ImGui::EndPopup();
+        }
+    };
+    const auto counts = [&](const KeyInfo &key) {
+        ImGui::TableNextColumn();
+        ImGui::Text("%d", key.reads);
+        ImGui::TableNextColumn();
+        ImGui::Text("%d", key.writes);
+        ImGui::TableNextColumn();
+        if (key.undefined())
+            ImGui::TextColored(palette().warn, "never set");
+        else if (key.unused())
+            ImGui::TextDisabled("never read");
+    };
+    const auto flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_BordersInnerH;
+    const auto header = [&](const char *title, std::size_t count) {
+        char label[64];
+        std::snprintf(label, sizeof(label), "%s (%zu)###%s", title, count, title);
+        return ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen);
+    };
+
+    // Inputs: the subtree's ports (Edit ports… changes them).
+    if (entry->id == session.active && header("Inputs", inputs.size())) {
+        if (inputs.empty())
+            ImGui::TextDisabled("No ports: Tree > Edit subtree ports adds them");
+        else if (ImGui::BeginTable("##inputs", 4, flags)) {
+            for (const auto *key : inputs) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                keyCell(*key);
+                ImGui::SameLine();
+                ImGui::TextColored(directionColor(key->portDirection), "%s", directionBadge(key->portDirection));
+                counts(*key);
+            }
+            ImGui::EndTable();
+        }
+    }
+
+    // Globals: set before the tree runs, in the order their values need. No nodes: one Script the editor keeps.
+    if (header("Globals", globals.size())) {
+        const auto all = readGlobals(*entry->tree).globals;
+        const auto apply = [&](const std::vector<Global> &list, const std::string &what) {
+            if (session.editor.setGlobals(session.active, list)) {
+                session.globalCycle.clear();
+                session.status(what);
+                return true;
+            }
+            session.globalCycle.clear();
+            for (const auto &cycle : session.editor.cycles())
+                session.globalCycle.insert(session.globalCycle.end(), cycle.begin(), cycle.end());
+            session.status(session.editor.error(), true);
+            return false;
+        };
+        if (!globals.empty() && ImGui::BeginTable("##globals", 3, flags)) {
+            ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthStretch, 1);
+            ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 1.6f);
+            ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed);
+            for (const auto *key : globals) {
+                ImGui::PushID(key->name.c_str());
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                keyCell(*key);
+                ImGui::TableNextColumn();
+                // The value: text, with {key} for another global or an input (they are joined in).
+                static std::map<std::string, std::string> editing;
+                auto &value = editing.try_emplace(key->name, key->value).first->second;
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                inputStringWithHint("##value", "text, {key}…", value);
+                if (ImGui::IsItemDeactivatedAfterEdit() && value != key->value) {
+                    auto list = all;
+                    for (auto &global : list)
+                        if (global.name == key->name)
+                            global.value = value;
+                    apply(list, "Set " + key->name);
+                }
+                if (!ImGui::IsItemActive())
+                    value = key->value;
+                if (ImGui::IsItemHovered() && key->uses.empty())
+                    ImGui::SetTooltip("Not read anywhere yet");
+                ImGui::TableNextColumn();
+                if (ImGui::SmallButton("x")) {
+                    auto list = all;
+                    list.erase(std::remove_if(list.begin(), list.end(), [&](auto &g) { return g.name == key->name; }),
+                               list.end());
+                    apply(list, "Removed global " + key->name);
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Remove the global");
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+        // A new one.
+        static std::string name, value;
+        ImGui::SetNextItemWidth(ui(130));
+        bool add = inputStringWithHint("##newname", "new global", name, ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(-ui(60));
+        add |= inputStringWithHint("##newvalue", "value", value, ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SameLine();
+        add |= ImGui::Button("+ Global");
+        if (add && !name.empty()) {
+            auto list = all;
+            list.push_back({name, value});
+            if (apply(list, "New global " + name)) {
+                session.highlightKey = name;
+                name.clear();
+                value.clear();
             }
         }
     }
 
-    const auto &variables = session.variables(session.active);
-    std::vector<const KeyInfo *> shown;
-    for (const auto &[name, key] : variables.keys)
-        if (fuzzyMatch(filter, name).matched)
-            shown.push_back(&key);
-
-    const auto flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp |
-                       ImGuiTableFlags_BordersInnerH;
-    const float detail = session.highlightKey.empty() ? 0 : ui(170);
-    if (ImGui::BeginTable("##keys", 4, flags, {0, -detail})) {
-        ImGui::TableSetupScrollFreeze(0, 1);
+    // Locals: keys bound while the tree runs (a node's {key}, a setter, a script).
+    if (header("Locals", locals.size()) && !locals.empty() && ImGui::BeginTable("##locals", 4, flags)) {
         ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Reads", ImGuiTableColumnFlags_WidthFixed);
         ImGui::TableSetupColumn("Writes", ImGuiTableColumnFlags_WidthFixed);
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed);
         tableHeaders();
-        for (const auto *key : shown) {
+        for (const auto *key : locals) {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            chip(keyColor(key->name));
-            if (ImGui::Selectable(("{" + key->name + "}").c_str(), session.highlightKey == key->name,
-                                  ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick)) {
-                session.highlightKey = session.highlightKey == key->name ? "" : key->name;
-                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !key->uses.empty()) {
-                    session.highlightKey = key->name;
-                    session.reveal(key->uses.front().node);
-                }
-            }
-            if (ImGui::BeginPopupContextItem()) {
-                if (ImGui::MenuItem("Rename…", "F2"))
-                    session.ask(Session::Dialog::RenameKey, session.active, key->name);
-                if (ImGui::MenuItem("Go to first use") && !key->uses.empty())
-                    session.reveal(key->uses.front().node);
-                ImGui::EndPopup();
-            }
-            ImGui::TableNextColumn();
-            ImGui::Text("%d", key->reads);
-            ImGui::TableNextColumn();
-            ImGui::Text("%d", key->writes);
-            ImGui::TableNextColumn();
-            if (key->port) {
-                ImGui::TextColored(directionColor(key->portDirection), "port %s", directionBadge(key->portDirection));
-                ImGui::SameLine();
-            }
-            if (key->undefined())
-                ImGui::TextColored(palette().warn, "never set");
-            else if (key->unused())
-                ImGui::TextDisabled("never read");
+            keyCell(*key);
+            counts(*key);
         }
         ImGui::EndTable();
     }
+    ImGui::EndChild();
 
     // The highlighted key's uses.
     if (!session.highlightKey.empty()) {

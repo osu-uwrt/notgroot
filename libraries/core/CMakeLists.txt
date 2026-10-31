@@ -6,6 +6,7 @@ add_library(notgroot_core
   src/workspace.cpp
   src/history.cpp
   src/edit.cpp
+  src/globals.cpp
   src/variables.cpp
   src/validate.cpp
   src/layout.cpp

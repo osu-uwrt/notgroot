@@ -1,5 +1,6 @@
 // Blackboard key analysis of one tree.
 #include "notgroot/core/variables.hpp"
+#include "notgroot/core/globals.hpp"
 #include <cctype>
 
 namespace notgroot::core {
@@ -171,7 +172,14 @@ TreeVariables analyzeVariables(const Workspace &workspace, const std::string &tr
                 info.name = port.name;
                 info.port = true;
                 info.portDirection = port.direction;
+                info.scope = Scope::Input;
             }
+    for (const auto &global : readGlobals(*entry->tree).globals) {
+        auto &info = result.keys[global.name];
+        info.name = global.name;
+        info.scope = Scope::Global;
+        info.value = global.value;
+    }
     return result;
 }
 } // namespace notgroot::core

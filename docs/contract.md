@@ -1,6 +1,6 @@
 # notgroot ↔ riptide_autonomy file contract
 
-Version 4. Both sides follow this document; a change is agreed by both, then the version here goes up and
+Version 5. Both sides follow this document; a change is agreed by both, then the version here goes up and
 riptide_autonomy's README summary is updated to match.
 
 notgroot edits the XML that riptide_autonomy's `doTask` runs with BehaviorTree.CPP 4 (apt
@@ -92,6 +92,29 @@ notgroot's acceptance test round-trips every file of the workspace byte-for-byte
 - Loops and checks use the builtins: `Repeat`, `RetryUntilSuccessful`, and `Precondition` (or `_skipIf` and the
   other script attributes) for comparisons. Script code names keys bare (`obj == 'table_spoon_pink'`); notgroot
   reads the keys a script names (assigned: written, otherwise read) for its variables panel and checks.
+- **Globals** are keys a tree sets before anything in it runs. notgroot owns them, like the SubTree models: a tree
+  with globals wraps its root in a `Sequence name="globals"` right after a `<!-- notgroot:globals -->` comment, whose
+  first child is one `Script` setting them all, then the real root:
+
+  ```xml
+  <BehaviorTree ID="ShootBothObjectsMpc">
+      <!-- notgroot:globals -->
+      <Sequence name="globals">
+          <Script code="ms_prox := '1.5'; object_1_frame := object_1 .. '_frame'"/>
+          <Sequence name="Search both holes, then shoot both">…</Sequence>
+      </Sequence>
+  </BehaviorTree>
+  ```
+
+  - Each statement is `name := value`. Text is single-quoted, so it stays text, as `SetBlackboardV3` stores it.
+    A value built from other keys (`{object_1}_frame` in the editor, as `Format` writes it) joins them with `..`.
+    A lone key (`copy := depth`) copies it.
+  - Statements come after the globals they use, otherwise by name; a set of globals that use each other in a
+    circle is refused. A value may use the tree's inputs (its ports) and other globals, nothing set at runtime.
+  - A global is the tree's own, like every key: subtrees still get it through their ports.
+  - `Script` strings can't escape `'`, so a global's text can't hold one. A Script notgroot didn't write this way is
+    an ordinary node.
+  - `notgroot-globals <trees>` converts the setters each tree always runs first.
 
 ## 6. Editor metadata
 

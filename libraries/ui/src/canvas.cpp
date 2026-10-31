@@ -1,4 +1,5 @@
 // Canvas: the active tree as cards in an automatic tidy layout, with keyboard navigation and editing.
+#include "notgroot/core/globals.hpp"
 #include "notgroot/core/layout.hpp"
 #include "notgroot/ui/panels.hpp"
 #include "notgroot/ui/style.hpp"
@@ -174,6 +175,17 @@ void measure(Card &card, const Metrics &m) {
     card.size.y = height;
 }
 
+// The element holding a tree's root node (the globals wrapper or the tree), and its ref.
+std::pair<const Element *, NodeRef> treeBodyRef(const Element &tree, const NodeRef &treeRef) {
+    const auto *body = treeBody(tree);
+    return {body, body == &tree ? treeRef : treeRef.child(body->index())};
+}
+
+// A child to draw as a card: not a comment, not the globals' Script.
+bool isNode(const Element &element) {
+    return !element.isComment() && !(element.tag == "Script" && isGlobalsPart(element));
+}
+
 // A call inside an opened subtree, named by the calls that lead to it (the one in this tree first).
 std::vector<NodeRef> callChain(const CardKey &key) {
     std::vector<NodeRef> chain{key.origin};
@@ -209,6 +221,9 @@ void build(Session &session, Scene &scene, const Element &element, const CardKey
         const auto *entry = session.workspace.tree(key.ref.tree);
         card.title = key.ref.tree;
         card.subtitle = entry && key.ref.tree != entry->id ? "mission" : "subtree";
+        // Its globals live in the Variables panel; the card says how many.
+        if (const auto count = readGlobals(element).globals.size())
+            card.subtitle += " · " + std::to_string(count) + (count == 1 ? " global" : " globals");
         if (entry && key.ref.tree == entry->id)
             card.color = treeColor(session.workspace, entry->id);
         if (entry && key.ref.tree == entry->id)
@@ -238,18 +253,21 @@ void build(Session &session, Scene &scene, const Element &element, const CardKey
             auto via = key.via;
             if (!own)
                 via.push_back(key.ref);
-            for (std::size_t i = 0; i < entry->tree->children.size(); ++i)
-                if (!entry->tree->children[i]->isComment())
-                    build(session, scene, *entry->tree->children[i], {{id, {i}}, own ? key.ref : key.origin, via},
+            const auto [body, bodyRef] = treeBodyRef(*entry->tree, {id, {}});
+            for (std::size_t i = 0; i < body->children.size(); ++i)
+                if (isNode(*body->children[i]))
+                    build(session, scene, *body->children[i], {bodyRef.child(i), own ? key.ref : key.origin, via},
                           index, depth + 1, stack, m);
             stack.pop_back();
         }
         return;
     }
-    for (std::size_t i = 0; i < element.children.size(); ++i)
-        if (!element.children[i]->isComment())
-            build(session, scene, *element.children[i], {key.ref.child(i), key.origin, key.via}, index, depth + 1,
-                  stack, m);
+    // A tree with globals: its root sits in their wrapper, after their Script (neither is shown).
+    const auto [body, bodyRef] = card.root ? treeBodyRef(element, key.ref) : std::pair{&element, key.ref};
+    for (std::size_t i = 0; i < body->children.size(); ++i)
+        if (isNode(*body->children[i]))
+            build(session, scene, *body->children[i], {bodyRef.child(i), key.origin, key.via}, index, depth + 1, stack,
+                  m);
 }
 
 std::size_t signature(Session &session) {
@@ -412,7 +430,7 @@ void drawOpened(const Scene &scene, const View &view, ImDrawList *draw, bool hor
             if (row == rows.begin())
                 label = a;
         }
-        const std::string text = card.title + " - read-only (Ctrl+Enter to edit)";
+        const std::string text = card.title + " · read-only · Ctrl+Enter to edit";
         notgroot::ui::text(draw, view.body, view.bodySize, {label.x + pad * view.zoom, label.y + ui(3) * view.zoom},
                            ImGui::GetColorU32(withAlpha(palette().muted, .9f)), text.c_str());
     }
@@ -825,7 +843,7 @@ void contextMenu(Session &session) {
         group({"tree.rename", "tree.ports"});
     } else {
         group({"node.child", "node.sibling", "node.wrap", "node.retype", "node.unwrap"});
-        group({"node.definition", "tree.extract", "tree.ports"});
+        group({"node.definition", "tree.extract", "tree.ports", "node.makeGlobal"});
         group({"edit.cut", "edit.copy", "edit.paste", "edit.duplicate", "edit.delete"});
         group({"select.below", "select.sameType", "select.siblings"});
     }
@@ -873,6 +891,8 @@ Drop dropAt(Session &session, const Scene &scene, int under, ImVec2 mouse, ImVec
     }
     // Not into themselves, and not past what the parent takes.
     const auto *parent = resolve(session.workspace, drop.parent);
+    if (parent && parent->tag == "BehaviorTree")
+        parent = treeBody(*parent); // a tree with globals holds its root in their wrapper
     int arriving = 0;
     for (const auto &ref : moving) {
         if (ref.tree != drop.parent.tree || ref == drop.parent || isAncestor(ref, drop.parent))
@@ -880,8 +900,7 @@ Drop dropAt(Session &session, const Scene &scene, int under, ImVec2 mouse, ImVec
         const auto *node = resolve(session.workspace, ref);
         arriving += node && node->parent != parent;
     }
-    const int most =
-        parent->tag == "BehaviorTree" ? 1 : maxChildren(nodeCategory(*parent, session.workspace.catalog()));
+    const int most = capacity(session.workspace.catalog(), *parent);
     drop.ok = most < 0 || int(nodeChildren(*parent).size()) + arriving <= most;
     return drop;
 }

@@ -136,8 +136,8 @@ void Window::loadFonts(float ui, const ui::Theme &theme, const std::filesystem::
     const float k = body / 15;
     // Latin-1, general punctuation (dashes, ellipsis) and arrows
     static const ImWchar ranges[] = {0x0020, 0x00FF, 0x2010, 0x203A, 0x2190, 0x21FF, 0x25A0, 0x25FF, 0};
-    // ASCII, the ellipsis and the bullet: all the cards draw
-    static const ImWchar cardRanges[] = {0x0020, 0x007E, 0x2022, 0x2026, 0};
+    // ASCII, the middle dot, the ellipsis and the bullet: all the cards draw
+    static const ImWchar cardRanges[] = {0x0020, 0x007E, 0x00B7, 0x00B7, 0x2022, 0x2026, 0};
     std::vector<ImFont *> cardTitles, cardBodies;
     if (std::filesystem::exists(font)) {
         ImFontConfig config;

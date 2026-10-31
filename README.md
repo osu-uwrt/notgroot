@@ -58,12 +58,16 @@ saving writes only the files you changed. Includes are recomputed on save, so yo
   - The `{}` button switches a value between text and a key.
   - Typing `{` suggests the tree's keys.
   - Also adds preconditions and scripts (`_skipIf`, `_onSuccess`…).
-- **Variables.**
-  - Lists every blackboard key of the open tree: reads, writes, whether it is one of the subtree's ports, and
-    whether it is never set or never read.
+- **Variables.** The open tree's blackboard keys, in three sections:
+  - **Inputs:** the subtree's ports, shown on its root card too.
+  - **Globals:** set before the tree runs, usable anywhere in it, with no nodes on the canvas (one hidden `Script`,
+    contract section 5). Edit them in place; a value can use other globals and inputs (`{object}_frame`), and
+    notgroot writes them in the order that needs, refusing globals that use each other in a circle (shown in red).
+    Right-click a `SetBlackboardV3` or `Format` and choose Make global to turn it into one.
+  - **Locals:** every key bound while the tree runs (a node's `{key}`, a setter, a script), with reads and writes,
+    and whether it is never set or never read.
   - Select a key to highlight it on the canvas and list its uses.
   - F2 renames it, at the subtree's call sites too when it is a port.
-  - Declare inserts a `SetBlackboardV3` for a new key.
   - Keys named in script code (`Precondition if`, `_skipIf` and the other script attributes, `Script`) count as
     reads, or as writes when assigned.
 - **Trees panel and palette.** Missions and subtrees, and every node model, each with a fuzzy filter. Drag a model

@@ -104,6 +104,7 @@ class Session {
 
     // A key highlighted on the canvas (from the variables panel or the finder).
     std::string highlightKey;
+    std::vector<std::string> globalCycle; // globals the last refused edit would have put in a circle
 
     // --- after an edit ---
     // Moves the cursor to what an edit made, or shows why it refused.

@@ -17,8 +17,14 @@ struct KeyUse {
     bool script = false;  // keys named in script code (Script, Precondition if, _skipIf…): reads or writes
 };
 
+// Where a key comes from: handed in (a subtree's port), set before the tree runs (globals.hpp), or bound while it
+// runs ({key} on a node's port, a setter, a script).
+enum class Scope { Input, Global, Local };
+
 struct KeyInfo {
     std::string name;
+    Scope scope = Scope::Local;
+    std::string value; // a global's value
     std::vector<KeyUse> uses;
     int reads = 0, writes = 0;
     bool port = false; // one of the tree's own ports (subtree model)

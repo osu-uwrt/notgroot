@@ -112,9 +112,13 @@ void collectNodes(Session &session, const std::string &tree, const Element &elem
                   std::vector<Target> &out) {
     for (std::size_t i = 0; i < element.children.size(); ++i) {
         const auto &child = element.children[i];
-        if (child->isComment())
+        if (child->isComment() || (child->tag == "Script" && isGlobalsPart(*child)))
             continue;
         const auto childRef = ref.child(i);
+        if (isGlobalsPart(*child)) {
+            collectNodes(session, tree, *child, childRef, out);
+            continue;
+        }
         const bool call = isSubTree(*child);
         std::string label = call ? "SubTree " + child->get("ID") : nodeId(*child);
         if (child->has("name"))

@@ -2,6 +2,7 @@
 // subtree ports, and whole trees (new, rename, extract, delete). Nodes are named by NodeRef, which survives undo
 // (element pointers do not).
 #pragma once
+#include "notgroot/core/globals.hpp"
 #include "notgroot/core/history.hpp"
 #include "notgroot/core/models.hpp"
 #include "notgroot/core/workspace.hpp"
@@ -112,6 +113,16 @@ class Editor {
     // it.
     bool setTreeColor(const std::string &key, const std::string &hex);
 
+    // Globals (globals.hpp). setGlobals sets a tree's whole list, written in dependency order, and refuses a cycle
+    // (cycles() then names its keys). makeGlobal turns a SetBlackboardV3 (text, or one {key} to copy) or a Format into
+    // a global when its key is set nowhere else and read nowhere before it; `strict` also wants it to run whenever
+    // the tree does (only Sequences above it), as the batch conversion does.
+    bool setGlobals(const std::string &tree, std::vector<Global>);
+    bool makeGlobal(const NodeRef &, bool strict = false);
+    const std::vector<std::vector<std::string>> &cycles() const {
+        return cycles_;
+    }
+
     // Where every subtree is called from.
     std::vector<NodeRef> callSites(const std::string &id) const;
 
@@ -122,6 +133,7 @@ class Editor {
   private:
     bool fail(std::string message);
     std::string error_;
+    std::vector<std::vector<std::string>> cycles_;
     Workspace &workspace_;
     History &history_;
 };

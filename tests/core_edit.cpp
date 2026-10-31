@@ -197,6 +197,74 @@ TEST_F(Fixture, ScriptsReadAndWriteKeys) {
     EXPECT_EQ(vars.keys.count("root"), 0u); // @root is the root blackboard's
 }
 
+TEST(Globals, ScriptRoundTripAndOrder) {
+    std::vector<std::vector<std::string>> cycles;
+    const auto ordered = orderGlobals(
+        {{"frame", "{object}_frame"}, {"object", "buoy"}, {"depth", "-1.5"}, {"copy", "{depth}"}, {"empty", ""}},
+        cycles);
+    ASSERT_TRUE(cycles.empty());
+    std::vector<std::string> names;
+    for (const auto &g : ordered)
+        names.push_back(g.name);
+    EXPECT_EQ(names, (std::vector<std::string>{"depth", "copy", "empty", "object", "frame"}));
+    const auto code = scriptFor(ordered);
+    EXPECT_EQ(code, "depth := '-1.5'; copy := depth; empty := ''; object := 'buoy'; frame := object .. '_frame'");
+    std::vector<Global> back;
+    ASSERT_TRUE(parseScript(code, back));
+    EXPECT_EQ(back, ordered);
+    EXPECT_FALSE(parseScript("x := 1 + 2", back)); // not notgroot's
+    EXPECT_FALSE(globalProblem({"talos/base_link", "x"}).empty());
+    EXPECT_FALSE(globalProblem({"a", "it's"}).empty());
+
+    orderGlobals({{"a", "{b}"}, {"b", "x{c}"}, {"c", "{a}"}, {"d", "{d}"}, {"e", "1"}}, cycles);
+    EXPECT_EQ(cycles, (std::vector<std::vector<std::string>>{{"a", "b", "c"}, {"d"}}));
+}
+
+TEST_F(Fixture, GlobalsWrapTheRootAndCome) {
+    const auto before = text("Toy.xml");
+    ASSERT_TRUE(editor.setGlobals("Toy.xml", {{"target", "buoy"}, {"frame", "{target}_frame"}})) << editor.error();
+    const auto *tree = workspace.tree("Toy.xml")->tree;
+    const auto globals = readGlobals(*tree);
+    ASSERT_NE(globals.wrapper, nullptr);
+    EXPECT_EQ(globals.script->get("code"), "target := 'buoy'; frame := target .. '_frame'");
+    EXPECT_EQ(nodeId(*treeBody(*tree)->elements()[1]), "Sequence"); // the root, after the Script
+    const auto vars = analyzeVariables(workspace, "Toy.xml");
+    EXPECT_EQ(vars.keys.at("frame").scope, Scope::Global);
+    EXPECT_EQ(vars.keys.at("moved").scope, Scope::Local);
+    EXPECT_TRUE(floatingNodes(workspace, "Toy.xml").empty());
+
+    // Saved and read back, it is the same; a cycle is refused and named.
+    EXPECT_FALSE(editor.setGlobals("Toy.xml", {{"a", "{b}"}, {"b", "{a}"}}));
+    EXPECT_EQ(editor.cycles(), (std::vector<std::vector<std::string>>{{"a", "b"}}));
+    ASSERT_TRUE(editor.setGlobals("Toy.xml", {}));
+    EXPECT_EQ(text("Toy.xml"), before);
+    history.undo();
+    history.undo();
+    EXPECT_EQ(text("Toy.xml"), before);
+}
+
+TEST_F(Fixture, MakeGlobalFromSetter) {
+    const auto seq = sequence();
+    const auto setter = refOf(workspace, nodeChildren(*resolve(workspace, seq))[0]);
+    ASSERT_TRUE(editor.makeGlobal(setter, true)) << editor.error();
+    const auto *tree = workspace.tree("Toy.xml")->tree;
+    EXPECT_EQ(readGlobals(*tree).globals, (std::vector<Global>{{"depth", "-1.5"}}));
+    const auto body = treeBody(*tree);
+    const auto root = nodeChildren(*body)[1];
+    EXPECT_EQ(nodeId(*nodeChildren(*root)[0]), "Info");
+    EXPECT_TRUE(root->children[0]->isComment()); // the comment stays
+    // Inserting into the tree goes into the wrapper, where a second root floats... and is refused.
+    EXPECT_TRUE(editor.insert({"Toy.xml", {}}, 1, makeNode(*workspace.catalog().find("Info")), "Add").empty());
+    history.undo();
+    EXPECT_EQ(nodeId(*nodeChildren(*resolve(workspace, sequence()))[0]), "SetBlackboardV3");
+
+    // Not from a key read before it, or set twice.
+    const auto info = refOf(workspace, nodeChildren(*resolve(workspace, sequence()))[1]);
+    EXPECT_TRUE(editor.setAttribute(sequence(), "_skipIf", "depth > 0"));
+    EXPECT_FALSE(editor.makeGlobal(setter, true));
+    (void)info;
+}
+
 TEST_F(Fixture, VariablesOfASubtreeIncludeItsPorts) {
     const auto vars = analyzeVariables(workspace, "Move");
     EXPECT_TRUE(vars.keys.at("x").port);

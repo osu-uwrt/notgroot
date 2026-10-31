@@ -321,11 +321,14 @@ std::vector<NodeRef> Session::allNodes() const {
         return all;
     const std::function<void(const Element &, const NodeRef &)> visit = [&](const Element &element,
                                                                             const NodeRef &ref) {
-        for (std::size_t i = 0; i < element.children.size(); ++i)
-            if (!element.children[i]->isComment()) {
+        for (std::size_t i = 0; i < element.children.size(); ++i) {
+            const auto &child = *element.children[i];
+            if (child.isComment() || (child.tag == "Script" && isGlobalsPart(child)))
+                continue;
+            if (!isGlobalsPart(child)) // the globals wrapper: only its root is a node
                 all.push_back(ref.child(i));
-                visit(*element.children[i], ref.child(i));
-            }
+            visit(child, ref.child(i));
+        }
     };
     visit(*entry->tree, {active, {}});
     return all;
@@ -606,6 +609,19 @@ void Session::registerCommands() {
                  status("Not a subtree call", true);
          },
          onTree, [this, onCall] { return onCall() || cursor.readOnly(); }});
+
+    add({"node.makeGlobal", "Make global (set before the tree runs)", "Node", 0, false,
+         [this] {
+             if (editor.makeGlobal(cursor.ref))
+                 status("Now a global: see Variables > Globals");
+             else
+                 status("Can't make it global: " + editor.error(), true);
+         },
+         onEditable,
+         [this, at, onEditable] {
+             const auto *element = at();
+             return onEditable() && element && (nodeId(*element) == "SetBlackboardV3" || nodeId(*element) == "Format");
+         }});
 
     // Tree
     add({"tree.newSubtree", "New subtree…", "Tree", ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N, false,

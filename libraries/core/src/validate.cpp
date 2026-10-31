@@ -1,5 +1,6 @@
 // Structural validation.
 #include "notgroot/core/validate.hpp"
+#include "notgroot/core/globals.hpp"
 #include "notgroot/core/variables.hpp"
 #include <cstdlib>
 #include <functional>
@@ -147,15 +148,32 @@ void checkTree(const Workspace &workspace, const TreeEntry &entry, std::vector<P
     const auto add = [&](Severity severity, std::string message) {
         out.push_back({severity, std::move(message), document.path, entry.tree->line, ref, {}});
     };
-    const auto roots = entry.tree->elements().size();
+    // With globals, the root sits in their wrapper, after their Script.
+    const auto *body = treeBody(*entry.tree);
+    const auto roots = body->elements().size() - (body != entry.tree ? 1 : 0);
     if (roots == 0)
         add(Severity::Error, entry.key + " is empty: a tree needs one root node");
     else if (roots > 1)
         add(Severity::Error, entry.key + " has " + std::to_string(roots) + " root nodes; a tree has one");
     walk(workspace, document, *entry.tree, ref, out);
 
+    // Globals: written in an order where each comes after what it uses, so none may use itself through others.
+    std::vector<std::vector<std::string>> cycles;
+    orderGlobals(readGlobals(*entry.tree).globals, cycles);
+    for (const auto &cycle : cycles) {
+        std::string names;
+        for (const auto &name : cycle)
+            names += (names.empty() ? "" : ", ") + name;
+        for (const auto &name : cycle)
+            add(Severity::Error, "global " + name + " is part of a circle of globals that use each other: " + names);
+    }
+
     // Keys read but never set (and not a port), set but never read.
     for (const auto &[name, key] : analyzeVariables(workspace, entry.key).keys) {
+        if (key.scope == Scope::Global && key.port)
+            add(Severity::Error, "global " + name + " has an input's name");
+        else if (key.scope == Scope::Global && key.writes > 1)
+            add(Severity::Warning, "global " + name + " is set again while the tree runs: make it a local");
         if (key.uses.empty())
             continue;
         const auto &first = key.uses.front();

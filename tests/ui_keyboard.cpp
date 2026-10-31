@@ -326,3 +326,20 @@ TEST_F(Harness, ShortcutsCloseWithEscOrClickOutside) {
     frames(2);
     EXPECT_FALSE(session.showShortcuts);
 }
+
+// Make global from the node menu: the setter leaves the canvas, the key is a global.
+TEST_F(Harness, MakeGlobalFromTheNodeMenu) {
+    session.setCursor(core::NodeRef{"Toy.xml", {0, 1}}); // SetBlackboardV3 depth
+    frames(2);
+    ASSERT_TRUE(ui::Session::applies(*session.command("node.makeGlobal")));
+    session.run("node.makeGlobal");
+    const auto &vars = session.variables("Toy.xml");
+    EXPECT_EQ(vars.keys.at("depth").scope, core::Scope::Global);
+    EXPECT_EQ(core::readGlobals(*session.workspace.tree("Toy.xml")->tree).globals,
+              (std::vector<core::Global>{{"depth", "-1.5"}}));
+    frames(2);
+    session.setCursor(core::NodeRef{"Toy.xml", {1, 1}}); // the Sequence, now in the wrapper
+    frames(2);
+    EXPECT_EQ(cursorId(), "Sequence");
+    EXPECT_FALSE(ui::Session::applies(*session.command("node.makeGlobal")));
+}

@@ -52,6 +52,7 @@ add_subdirectory(app)
 # The BehaviorTree.CPP check (fetches BT.CPP 4.10.0 once at configure).
 set(NOTGROOT_BTCPP_SHA256 c758fdedb3666f7ca4c9998a4c0b243251e0a5fb5d03c99e2ee63d615af7a71d)
 add_subdirectory(tools/check)
+add_subdirectory(tools/globals)
 
 if(BUILD_TESTING)
   find_package(GTest REQUIRED)
