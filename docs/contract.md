@@ -1,6 +1,6 @@
 # notgroot ↔ riptide_autonomy file contract
 
-Version 1. Both sides follow this document; a change is agreed by both, then the version here goes up and
+Version 2. Both sides follow this document; a change is agreed by both, then the version here goes up and
 riptide_autonomy's README summary is updated to match.
 
 notgroot edits the XML that riptide_autonomy's `doTask` runs with BehaviorTree.CPP 4 (apt
@@ -66,7 +66,8 @@ Both sides' writers produce exactly this, so a save that changes nothing changes
   and newline as `&#10;`.
 - An element without children or text closes itself (`<Foo a="1"/>`). An element with only text is on one line:
   `<input_port name="x">text</input_port>` (text trimmed, escaped `&amp; &lt; &gt;`).
-- Comments are kept where they are, on their own line at the element's indent: `<!-- text -->`.
+- Comments are kept where they are. A comment's text is kept verbatim between `<!--` and `-->` (inner newlines,
+  continuation-line indent and the spaces around the text included); its first line is at the element's indent.
 - No blank lines.
 
 notgroot's acceptance test round-trips every file of the workspace byte-for-byte.
@@ -76,6 +77,8 @@ notgroot's acceptance test round-trips every file of the workspace byte-for-byte
 - A value that starts with `{` and ends with `}` is a blackboard key (`{x}`); anything else is a literal.
 - A `<SubTree ID="X" port="{key}"/>` passes the parent's key; `port="text"` passes the text.
 - Output ports take `{key}`.
+- Converted trees pass v3's empty-key remap (`a=""`) as `{__v3_empty}`, a key that is never set; `{}` is not a key
+  in BehaviorTree.CPP 4.
 - Subtrees run on their own isolated blackboard: no `_autoremap`, no shared blackboard.
 - The v3-behavior nodes `SetBlackboardV3`, `RepeatV3`, `RetryUntilSuccessfulV3` and `BlackboardCheckString` are
   ordinary custom nodes. Converted trees use them; new trees may use the builtins.
