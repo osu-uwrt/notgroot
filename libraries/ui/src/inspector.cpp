@@ -65,7 +65,7 @@ int completeCallback(ImGuiInputTextCallbackData *data) {
 
 // The editable value of one attribute. Commits on Enter or when the field loses focus; Esc returns to the canvas.
 void valueField(Session &session, const NodeRef &ref, const std::string &name, const std::string &value,
-                const std::vector<std::string> &keys, bool focus) {
+                const std::vector<std::string> &keys, bool focus, bool toggle = true) {
     static std::map<std::string, std::string> buffers;
     const std::string id = "##value_" + name;
     const ImGuiID field = ImGui::GetID(id.c_str());
@@ -74,20 +74,22 @@ void valueField(Session &session, const NodeRef &ref, const std::string &name, c
         buffer = value;
 
     // {} toggles between text and a key.
-    const bool key = isKeyReference(value);
-    if (key)
-        ImGui::PushStyleColor(ImGuiCol_Button, withAlpha(keyColor(keyOf(value)), .35f));
-    if (ImGui::SmallButton(("{}##toggle_" + name).c_str())) {
+    const bool key = toggle && isKeyReference(value);
+    if (toggle) {
         if (key)
-            session.edited(session.editor.setAttribute(ref, name, keyOf(value)));
-        else
-            session.edited(session.editor.setAttribute(ref, name, "{" + (value.empty() ? name : value) + "}"));
+            ImGui::PushStyleColor(ImGuiCol_Button, withAlpha(keyColor(keyOf(value)), .35f));
+        if (ImGui::SmallButton(("{}##toggle_" + name).c_str())) {
+            if (key)
+                session.edited(session.editor.setAttribute(ref, name, keyOf(value)));
+            else
+                session.edited(session.editor.setAttribute(ref, name, "{" + (value.empty() ? name : value) + "}"));
+        }
+        if (key)
+            ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(key ? "A blackboard key: click for text" : "Text: click to make it a blackboard key");
+        ImGui::SameLine();
     }
-    if (key)
-        ImGui::PopStyleColor();
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip(key ? "A blackboard key: click for text" : "Text: click to make it a blackboard key");
-    ImGui::SameLine();
 
     if (focus)
         ImGui::SetKeyboardFocusHere();
@@ -257,7 +259,7 @@ void drawInspector(Session &session) {
     };
 
     sectionTitle("Name");
-    valueField(session, cursor.ref, "name", element->get("name"), {}, focusHere("name"));
+    valueField(session, cursor.ref, "name", element->get("name"), {}, focusHere("name"), false);
 
     // Ports: the model's, then attributes it does not know, then the special ones.
     const auto row = [&](const std::string &name, const char *badge, ImVec4 badgeInk, const std::string &tip,

@@ -6,6 +6,7 @@
 #include <GLFW/glfw3.h>
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -257,6 +258,8 @@ int App::run() {
         if (window_->closing() && closing_)
             break;
         applyPending();
+        if (!opt_.keys.empty() || !opt_.text.empty())
+            replay();
         window_->beginFrame();
         frame();
         ++frameCount_;
@@ -269,7 +272,75 @@ int App::run() {
     return 0;
 }
 
+namespace {
+// "Ctrl+Shift+P" -> the key and its modifiers (keys by ImGui's names: Down, Tab, F2, A…).
+bool parseKey(const std::string &text, ImGuiKey &key, ImGuiKeyChord &mods) {
+    mods = 0;
+    std::string rest = text;
+    for (const auto &[name, mod] : {std::pair<const char *, ImGuiKeyChord>{"Ctrl+", ImGuiMod_Ctrl},
+                                    {"Shift+", ImGuiMod_Shift},
+                                    {"Alt+", ImGuiMod_Alt}})
+        while (rest.rfind(name, 0) == 0) {
+            mods |= mod;
+            rest = rest.substr(std::strlen(name));
+        }
+    const std::string arrow =
+        rest == "Up" || rest == "Down" || rest == "Left" || rest == "Right" ? rest + "Arrow" : rest;
+    for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; ++k)
+        if (arrow == ImGui::GetKeyName(ImGuiKey(k))) {
+            key = ImGuiKey(k);
+            return true;
+        }
+    return false;
+}
+} // namespace
+
+// Replays --keys (one press every few frames, after the layout settles), then --type.
+void App::replay() {
+    static std::vector<std::string> keys;
+    static bool parsed = false;
+    if (!parsed) {
+        parsed = true;
+        std::string item;
+        for (const char c : opt_.keys + ",")
+            if (c == ',') {
+                if (!item.empty())
+                    keys.push_back(item);
+                item.clear();
+            } else
+                item += c;
+    }
+    const int step = frameCount_ - 6;
+    if (step < 0 || step % 3 != 0)
+        return;
+    auto &io = ImGui::GetIO();
+    const std::size_t index = std::size_t(step / 3);
+    if (index < keys.size()) {
+        ImGuiKey key = ImGuiKey_None;
+        ImGuiKeyChord mods = 0;
+        if (!parseKey(keys[index], key, mods)) {
+            std::cerr << "notgroot: --keys: unknown key " << keys[index] << '\n';
+            return;
+        }
+        for (const auto mod : {ImGuiMod_Ctrl, ImGuiMod_Shift, ImGuiMod_Alt})
+            if (mods & mod)
+                io.AddKeyEvent(ImGuiKey(mod), true);
+        io.AddKeyEvent(key, true);
+        pendingRelease_ = {key, mods};
+    } else if (index == keys.size() && !opt_.text.empty())
+        io.AddInputCharactersUTF8(opt_.text.c_str());
+}
+
 void App::frame() {
+    // A replayed press lasts one frame.
+    if (pendingRelease_.first != ImGuiKey_None) {
+        auto &io = ImGui::GetIO();
+        io.AddKeyEvent(pendingRelease_.first, false);
+        for (const auto mod : {ImGuiMod_Ctrl, ImGuiMod_Shift, ImGuiMod_Alt})
+            if (pendingRelease_.second & mod)
+                io.AddKeyEvent(ImGuiKey(mod), false);
+        pendingRelease_ = {ImGuiKey_None, 0};
+    }
     // Files picked in the desktop dialog, and files changed on disk (checked once a second).
     if (auto picked = picker_.take())
         openWorkspace(*picked);
@@ -350,10 +421,16 @@ void App::dockspace() {
 
 void App::statusBar() {
     const float height = ImGui::GetFrameHeight();
-    if (!ImGui::BeginViewportSideBar("##status", ImGui::GetMainViewport(), ImGuiDir_Down, height,
-                                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings |
-                                         ImGuiWindowFlags_MenuBar)) {
+    ui::beginSurface(ui::Surface::Board);
+    ImGui::PushStyleColor(ImGuiCol_MenuBarBg, ui::palette().bar);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ui::palette().bar);
+    const bool shown = ImGui::BeginViewportSideBar("##status", ImGui::GetMainViewport(), ImGuiDir_Down, height,
+                                                   ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings |
+                                                       ImGuiWindowFlags_MenuBar);
+    ImGui::PopStyleColor(2);
+    if (!shown) {
         ImGui::End();
+        ui::endSurface();
         return;
     }
     if (ImGui::BeginMenuBar()) {
@@ -380,11 +457,19 @@ void App::statusBar() {
         ImGui::EndMenuBar();
     }
     ImGui::End();
+    ui::endSurface();
 }
 
 void App::menuBar() {
-    if (!ImGui::BeginMainMenuBar())
+    // The bars are the theme's board (Nereus's menu and command bars), dropdowns included.
+    ui::beginSurface(ui::Surface::Board);
+    ImGui::PushStyleColor(ImGuiCol_MenuBarBg, ui::palette().bar);
+    const bool open = ImGui::BeginMainMenuBar();
+    ImGui::PopStyleColor();
+    if (!open) {
+        ui::endSurface();
         return;
+    }
     const auto commands = [&](const char *group) {
         for (const auto &command : session_.commands)
             if (command.group == group && command.id != "edit.redo2" &&
@@ -449,6 +534,7 @@ void App::menuBar() {
         ImGui::EndMenu();
     }
     ImGui::EndMainMenuBar();
+    ui::endSurface();
 }
 
 void App::aboutWindow() {

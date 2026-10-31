@@ -16,6 +16,8 @@ struct Options {
     std::filesystem::path screenshot; // --screenshot: save the frame after `frames` frames, then quit
     int frames = 0;                   // --frames: quit after this many frames (0: run until closed)
     bool persist = true;              // --no-persist: read and write no preferences (tests, screenshots)
+    std::string keys;                 // --keys: key presses replayed first, e.g. "Down,Down,Ctrl+E" (screenshots)
+    std::string text;                 // --type: text typed after them
 };
 
 class App {
@@ -35,6 +37,8 @@ class App {
     void updateTitle();
     // Quits now, or asks first when trees have unsaved edits.
     void quit();
+    void replay();
+    std::pair<ImGuiKey, ImGuiKeyChord> pendingRelease_{ImGuiKey_None, 0};
 
     // Theme: --theme, else the theme picked here (notgroot.yaml), else Nereus's (nereus/viewer.yaml), else
     // timing-board. Changes apply between frames.

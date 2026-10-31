@@ -22,6 +22,10 @@ int main(int argc, char **argv) {
             options.screenshot = value();
         else if (arg == "--frames")
             options.frames = std::stoi(value());
+        else if (arg == "--keys")
+            options.keys = value();
+        else if (arg == "--type")
+            options.text = value();
         else if (arg == "--no-persist")
             options.persist = false;
         else if (arg == "-h" || arg == "--help") {
