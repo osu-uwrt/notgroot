@@ -33,7 +33,7 @@ struct Placer {
 
         // Children left to right: each one shifted just clear of everything before it, level by level.
         Outline merged;
-        std::vector<float> centres;
+        std::vector<float> centers;
         for (std::size_t i = 0; i < box.children.size(); ++i) {
             const int child = box.children[i];
             Outline next = place(child);
@@ -46,7 +46,7 @@ struct Placer {
                     shift = std::max(shift, merged.right[level] - next.left[level] + gap);
                 }
             }
-            centres.push_back(shift);
+            centers.push_back(shift);
             for (std::size_t level = 0; level < next.left.size(); ++level) {
                 const float l = next.left[level] + shift, r = next.right[level] + shift;
                 if (level < merged.left.size()) {
@@ -60,9 +60,9 @@ struct Placer {
         }
 
         // Center the parent over its first and last child.
-        const float middle = (centres.front() + centres.back()) / 2;
+        const float middle = (centers.front() + centers.back()) / 2;
         for (std::size_t i = 0; i < box.children.size(); ++i)
-            offset[std::size_t(box.children[i])] = centres[i] - middle;
+            offset[std::size_t(box.children[i])] = centers[i] - middle;
         for (std::size_t level = 0; level < merged.left.size(); ++level) {
             outline.left.push_back(merged.left[level] - middle);
             outline.right.push_back(merged.right[level] - middle);
@@ -81,20 +81,20 @@ void levels(const std::vector<LayoutBox> &boxes, int index, std::size_t level, b
 }
 
 void assign(const std::vector<LayoutBox> &boxes, const std::vector<float> &offset, const std::vector<float> &levelStart,
-            int index, std::size_t level, float centre, bool horizontal, std::vector<LayoutRect> &rects) {
+            int index, std::size_t level, float center, bool horizontal, std::vector<LayoutRect> &rects) {
     const auto &box = boxes[std::size_t(index)];
     auto &rect = rects[std::size_t(index)];
     rect.width = box.width;
     rect.height = box.height;
     if (horizontal) {
         rect.x = levelStart[level];
-        rect.y = centre - box.height / 2;
+        rect.y = center - box.height / 2;
     } else {
-        rect.x = centre - box.width / 2;
+        rect.x = center - box.width / 2;
         rect.y = levelStart[level];
     }
     for (const int child : box.children)
-        assign(boxes, offset, levelStart, child, level + 1, centre + offset[std::size_t(child)], horizontal, rects);
+        assign(boxes, offset, levelStart, child, level + 1, center + offset[std::size_t(child)], horizontal, rects);
 }
 } // namespace
 
@@ -113,8 +113,8 @@ std::vector<LayoutRect> layoutTree(const std::vector<LayoutBox> &boxes, int root
         start.push_back(at);
         at += size + options.levelGap;
     }
-    const float centre = breadth(boxes[std::size_t(root)], options.horizontal) / 2;
-    assign(boxes, placer.offset, start, root, 0, centre, options.horizontal, rects);
+    const float center = breadth(boxes[std::size_t(root)], options.horizontal) / 2;
+    assign(boxes, placer.offset, start, root, 0, center, options.horizontal, rects);
     return rects;
 }
 } // namespace notgroot::core

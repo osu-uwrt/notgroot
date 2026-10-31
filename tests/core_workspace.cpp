@@ -92,7 +92,7 @@ TEST(Workspace, SaveWritesOnlyEditedFilesAndFixesIncludes) {
     EXPECT_TRUE(workspace.changedOnDisk().empty());
 }
 
-TEST(Workspace, NewSubtreeIsIncludedAndModelled) {
+TEST(Workspace, NewSubtreeIsIncludedAndModeled) {
     ScratchCopy copy("toy");
     Workspace workspace;
     openWorkspace(workspace, copy.path());

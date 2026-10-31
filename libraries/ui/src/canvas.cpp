@@ -20,7 +20,7 @@ namespace {
 struct Row {
     std::string port, value;
     PortDirection direction = PortDirection::Input;
-    bool modelled = true; // a port of the node's model (else an attribute BT.CPP would reject)
+    bool modeled = true;  // a port of the node's model (else an attribute BT.CPP would reject)
     bool special = false; // _skipIf and friends
     bool missing = false; // a model port the node does not set
 };
@@ -547,11 +547,11 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
             rowWritesKey(row, session.highlightKey))
             draw->AddRectFilled({a.x + 2 * z, y - m.rowGap * z / 2}, {b.x - 2 * z, y + line + m.rowGap * z / 2},
                                 ImGui::GetColorU32(withAlpha(keyColor(session.highlightKey), .18f)), ui(2) * z);
-        const ImVec4 badgeInk = row.special    ? palette().muted
-                                : row.modelled ? directionColor(row.direction)
-                                               : palette().error;
+        const ImVec4 badgeInk = row.special   ? palette().muted
+                                : row.modeled ? directionColor(row.direction)
+                                              : palette().error;
         text(draw, view.body, view.bodySize, {x, y}, ImGui::GetColorU32(withAlpha(badgeInk, alpha)),
-             row.special ? "IF" : (!row.modelled ? "??" : directionBadge(row.direction)));
+             row.special ? "IF" : (!row.modeled ? "??" : directionBadge(row.direction)));
         text(draw, view.body, view.bodySize, {x + badgeWidth, y},
              ImGui::GetColorU32(withAlpha(row.missing ? withAlpha(palette().muted, .6f) : palette().muted, alpha)),
              row.port.c_str());
@@ -607,14 +607,14 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
 }
 
 // The round button under a SubTree call that opens it in place (beside it in the left-right layout).
-bool caret(const Card &card, const View &view, bool horizontal, ImVec2 &centre, float &radius) {
+bool caret(const Card &card, const View &view, bool horizontal, ImVec2 &center, float &radius) {
     if (!card.call)
         return false;
     const ImVec2 a = view.at(card.position),
                  b = view.at({card.position.x + card.size.x, card.position.y + card.size.y});
     radius = std::max(5.f, ui(7) * view.zoom);
     const float gap = ui(3) * view.zoom + radius;
-    centre = horizontal ? ImVec2(b.x + gap, (a.y + b.y) / 2) : ImVec2((a.x + b.x) / 2, b.y + gap);
+    center = horizontal ? ImVec2(b.x + gap, (a.y + b.y) / 2) : ImVec2((a.x + b.x) / 2, b.y + gap);
     return true;
 }
 
@@ -639,7 +639,7 @@ void drawCaret(const Card &card, const View &view, ImDrawList *draw, bool horizo
 
 // --- keyboard ---
 
-int neighbour(const Scene &scene, int from, bool next, bool horizontal) {
+int neighbor(const Scene &scene, int from, bool next, bool horizontal) {
     const auto &card = scene.cards[std::size_t(from)];
     if (card.parent >= 0) {
         const auto &siblings = scene.cards[std::size_t(card.parent)].children;
@@ -707,9 +707,9 @@ void navigate(Session &session, const Scene &scene, int current) {
                 target = c;
         lastChild = {};
     } else if (steer && ImGui::IsKeyPressed(toPrevious))
-        target = neighbour(scene, current, false, h);
+        target = neighbor(scene, current, false, h);
     else if (steer && ImGui::IsKeyPressed(toNext))
-        target = neighbour(scene, current, true, h);
+        target = neighbor(scene, current, true, h);
     else if (plain && ImGui::IsKeyPressed(ImGuiKey_Home))
         target = 0;
     if (target >= 0) {

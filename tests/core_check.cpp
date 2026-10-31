@@ -52,7 +52,7 @@ TEST(BtCheck, UnsavedEditIsCheckedAndMappedBack) {
         if (node->tag == "SubTree" && node->get("x") == "2")
             node->set("x", "{depth}");
     auto *settle = workspace.tree("Settle");
-    settle->tree->elements().front()->set("colour", "red");
+    settle->tree->elements().front()->set("tint", "red");
     workspace.reindex();
     BtCheck check(NOTGROOT_CHECK);
     ASSERT_TRUE(check.start(workspace));
@@ -60,7 +60,7 @@ TEST(BtCheck, UnsavedEditIsCheckedAndMappedBack) {
     EXPECT_EQ(result.failed, 1);
     ASSERT_EQ(result.problems.size(), 1u);
     EXPECT_EQ(result.problems.front().file, notgroot::test::data("toy") / "Toy.xml");
-    EXPECT_NE(result.problems.front().message.find("colour"), std::string::npos) << result.problems.front().message;
+    EXPECT_NE(result.problems.front().message.find("tint"), std::string::npos) << result.problems.front().message;
     EXPECT_TRUE(workspace.tree("Settle")->document->dirty()); // (the index was rebuilt: look it up again)
 }
 

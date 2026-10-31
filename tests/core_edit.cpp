@@ -372,7 +372,7 @@ TEST_F(Fixture, ToyWorkspaceIsValid) {
 
 TEST_F(Fixture, ValidationFindsBtcppErrors) {
     auto *info = resolve(workspace, sequence().child(2));
-    info->set("colour", "red");                   // not a port
+    info->set("tint", "red");                   // not a port
     info->append(std::make_unique<Element>("X")); // a leaf with a child, and an unknown node
     workspace.reindex();
     int errors = 0;
@@ -395,7 +395,7 @@ TEST(Validate, RealTreesHaveNoErrors) {
     std::cout << warnings << " warnings in the real trees\n";
 }
 
-TEST(Layout, ChildrenDoNotOverlapAndParentsCentre) {
+TEST(Layout, ChildrenDoNotOverlapAndParentsCenter) {
     // root with three children; the middle one has two wide children.
     std::vector<LayoutBox> boxes{{100, 40, {1, 2, 3}}, {80, 40, {}},  {60, 40, {4, 5}},
                                  {80, 40, {}},         {200, 40, {}}, {200, 40, {}}};
