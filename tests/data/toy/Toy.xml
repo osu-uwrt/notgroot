@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="4" main_tree_to_execute="BehaviorTree">
+    <include path="lib/Move.xml"/>
+    <include path="lib/Settle.xml"/>
+    <BehaviorTree ID="BehaviorTree">
+        <Sequence name="TOY">
+            <!-- A comment, kept as written:
+                 its continuation lines keep their indent -->
+            <SetBlackboardV3 output_key="depth" value="-1.5"/>
+            <Info message="Diving to &quot;{depth}&quot; &lt; 0 &amp; more"/>
+            <SubTree ID="Move" x="{depth}" done="{moved}"/>
+            <Fallback>
+                <CompareNums a="{moved}" b="1" test="&gt;"/>
+                <SubTree ID="Settle"/>
+            </Fallback>
+            <SubTree ID="Move" x="2" done="{moved}"/>
+        </Sequence>
+    </BehaviorTree>
+</root>

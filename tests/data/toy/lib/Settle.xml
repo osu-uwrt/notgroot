@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="4">
+    <BehaviorTree ID="Settle">
+        <RetryUntilSuccessfulV3 num_attempts="3">
+            <Wait seconds="1"/>
+        </RetryUntilSuccessfulV3>
+    </BehaviorTree>
+</root>

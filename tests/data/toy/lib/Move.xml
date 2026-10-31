@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="4">
+    <include path="Settle.xml"/>
+    <BehaviorTree ID="Move">
+        <Sequence>
+            <GetOdometry x="{ox}" y="{oy}" z="{oz}"/>
+            <Math a="{x}" b="{ox}" operator="-" out="{dx}"/>
+            <SubTree ID="Settle"/>
+            <SetBlackboardV3 output_key="done" value="1"/>
+        </Sequence>
+    </BehaviorTree>
+</root>

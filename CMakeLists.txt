@@ -43,8 +43,14 @@ add_library(notgroot_imgui STATIC ${imgui}/imgui.cpp ${imgui}/imgui_draw.cpp
 target_include_directories(notgroot_imgui SYSTEM PUBLIC ${imgui})
 target_link_libraries(notgroot_imgui PRIVATE glfw ${CMAKE_DL_LIBS})
 
+add_subdirectory(libraries/core)
 add_subdirectory(libraries/ui)
 add_subdirectory(app)
+
+if(BUILD_TESTING)
+  find_package(GTest REQUIRED)
+  add_subdirectory(tests)
+endif()
 
 install(DIRECTORY content/ DESTINATION ${CMAKE_INSTALL_DATADIR}/notgroot)
 install(FILES ${imgui}/LICENSE.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/notgroot/legal RENAME imgui-MIT.txt)

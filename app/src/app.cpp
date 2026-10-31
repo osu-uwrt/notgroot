@@ -96,7 +96,8 @@ std::string App::preference(const char *key) const {
     try {
         return YAML::LoadFile((config_ / "notgroot.yaml").string())[key].as<std::string>("");
     } catch (const std::exception &error) {
-        std::cerr << "notgroot: ignoring " << config_ / "notgroot.yaml" << ": " << error.what() << '\n';
+        std::cerr << "notgroot: ignoring " << config_ / "notgroot.yaml"
+                  << ": " << error.what() << '\n';
         return {};
     }
 }

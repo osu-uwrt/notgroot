@@ -25,7 +25,7 @@ class Window {
     void requestClose();
     void cancelClose(); // a close the application refuses (asks first)
     void setTitle(const std::string &);
-    void beginFrame();                                // poll (or wait for) events + ImGui NewFrame
+    void beginFrame();                               // poll (or wait for) events + ImGui NewFrame
     void present(const std::filesystem::path &shot); // render ImGui, optional PNG of the frame
     void swap();
 

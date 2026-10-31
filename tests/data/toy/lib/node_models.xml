@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="4">
+    <TreeNodesModel>
+        <Action ID="CompareNums">
+            <input_port name="a" type="std::string"/>
+            <input_port name="b" type="std::string"/>
+            <input_port name="test" type="std::string">Comparison: ==, !=, &lt;, &gt;, &lt;=, &gt;=</input_port>
+        </Action>
+        <Action ID="GetOdometry">
+            <output_port name="x" type="std::string"/>
+            <output_port name="y" type="std::string"/>
+            <output_port name="z" type="std::string"/>
+        </Action>
+        <Action ID="Info">
+            <input_port name="message" type="std::string"/>
+        </Action>
+        <Action ID="Math">
+            <input_port name="a" type="std::string"/>
+            <input_port name="b" type="std::string"/>
+            <input_port name="operator" type="std::string"/>
+            <output_port name="out" type="std::string"/>
+        </Action>
+        <!-- notgroot:color=#00bcd4 -->
+        <SubTree ID="Move">
+            <output_port name="done"/>
+            <input_port name="x">Target x</input_port>
+        </SubTree>
+        <Decorator ID="RetryUntilSuccessfulV3">
+            <input_port name="num_attempts" type="std::string"/>
+        </Decorator>
+        <Action ID="SetBlackboardV3">
+            <inout_port name="output_key" type="std::string">Key to write</inout_port>
+            <input_port name="value" type="std::string"/>
+        </Action>
+        <Action ID="Wait">
+            <input_port name="seconds" type="std::string"/>
+        </Action>
+    </TreeNodesModel>
+</root>
