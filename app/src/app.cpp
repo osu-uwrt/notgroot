@@ -1,0 +1,265 @@
+// App: window, menus, dockspace and preferences around the editor panels.
+#include "app.hpp"
+#include "notgroot/ui/theme.hpp"
+#include <GL/glew.h>
+#include <GLFW/glfw3.h>
+#include <cstdlib>
+#include <fstream>
+#include <imgui.h>
+#include <imgui_internal.h>
+#include <iostream>
+#include <yaml-cpp/yaml.h>
+
+namespace fs = std::filesystem;
+
+namespace notgroot::app {
+fs::path contentDirectory() {
+    if (fs::exists(fs::path(NOTGROOT_CONTENT_DIR) / "themes"))
+        return NOTGROOT_CONTENT_DIR;
+    return NOTGROOT_INSTALLED_CONTENT_DIR;
+}
+
+fs::path configHome() {
+    if (const char *xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
+        return xdg;
+    if (const char *home = std::getenv("HOME"); home && *home)
+        return fs::path(home) / ".config";
+    return {};
+}
+
+App::App(Options options) : opt_(std::move(options)) {
+    content_ = contentDirectory();
+    if (opt_.persist && !configHome().empty())
+        config_ = configHome() / "notgroot";
+
+    const bool hidden = !opt_.screenshot.empty();
+    window_ = std::make_unique<Window>(1600, 1000, "notgroot", hidden);
+    window_->setIcon({content_ / "icons/notgroot_16.png", content_ / "icons/notgroot_32.png",
+                      content_ / "icons/notgroot_48.png", content_ / "icons/notgroot_64.png",
+                      content_ / "icons/notgroot_128.png", content_ / "icons/notgroot_256.png"});
+    window_->setIdleWait(hidden ? 0 : 0.5);
+
+    // Layout: the last session's docking, else the default arrangement built on the first frame.
+    if (!config_.empty() && fs::exists(config_ / "layout.ini"))
+        ImGui::LoadIniSettingsFromDisk((config_ / "layout.ini").c_str());
+
+    for (const auto &warning : ui::loadThemes(content_ / "themes"))
+        std::cerr << "notgroot: theme: " << warning << '\n';
+    followNereus_ = opt_.theme.empty() && preference("theme").empty();
+    const std::string theme = preferredTheme();
+    if (!ui::applyTheme(theme)) {
+        std::cerr << "notgroot: unknown theme '" << theme << "'; using timing-board\n";
+        if (!ui::applyTheme("timing-board"))
+            ui::applyTheme(ui::themes().front().id);
+    }
+
+    try {
+        if (const auto scale = preference("interface_scale"); !scale.empty() && scale != "auto")
+            uiScale_ = std::stof(scale);
+        else
+            uiScale_ = window_->contentScale();
+    } catch (const std::exception &) {
+        uiScale_ = window_->contentScale();
+    }
+    ui::setInterfaceScale(uiScale_);
+    window_->loadFonts(uiScale_, ui::currentThemeInfo(), content_ / "fonts");
+}
+
+App::~App() {
+    if (!config_.empty()) {
+        std::error_code error;
+        fs::create_directories(config_, error);
+        ImGui::SaveIniSettingsToDisk((config_ / "layout.ini").c_str());
+    }
+    if (logo_)
+        glDeleteTextures(1, &logo_);
+}
+
+std::string App::preferredTheme() const {
+    if (!opt_.theme.empty())
+        return opt_.theme;
+    if (auto own = preference("theme"); !own.empty())
+        return own;
+    // Nereus's own choice, so both tools look alike on one desktop.
+    if (const auto nereus = configHome() / "nereus/viewer.yaml"; !configHome().empty() && fs::exists(nereus))
+        try {
+            if (auto theme = YAML::LoadFile(nereus.string())["theme"].as<std::string>(""); !theme.empty())
+                return theme;
+        } catch (const std::exception &) {
+        }
+    return "timing-board";
+}
+
+std::string App::preference(const char *key) const {
+    if (config_.empty() || !fs::exists(config_ / "notgroot.yaml"))
+        return {};
+    try {
+        return YAML::LoadFile((config_ / "notgroot.yaml").string())[key].as<std::string>("");
+    } catch (const std::exception &error) {
+        std::cerr << "notgroot: ignoring " << config_ / "notgroot.yaml" << ": " << error.what() << '\n';
+        return {};
+    }
+}
+
+// Preferences in notgroot.yaml in the config directory; an empty value removes the key.
+void App::savePreference(const char *key, const std::string &value) {
+    if (config_.empty())
+        return;
+    try {
+        const auto file = config_ / "notgroot.yaml";
+        YAML::Node preferences(YAML::NodeType::Map);
+        if (fs::exists(file))
+            preferences = YAML::LoadFile(file.string());
+        if (value.empty())
+            preferences.remove(key);
+        else
+            preferences[key] = value;
+        fs::create_directories(config_);
+        std::ofstream(file) << preferences << '\n';
+    } catch (const std::exception &error) {
+        std::cerr << "notgroot: " << key << " not saved: " << error.what() << '\n';
+    }
+}
+
+// The theme changes between frames: mid-frame, pushed colors would pop back as the old theme's.
+void App::setTheme(const std::string &id, bool follow) {
+    pendingTheme_ = id;
+    pendingFollow_ = follow;
+}
+
+void App::applyPending() {
+    if (!pendingTheme_.empty()) {
+        const std::string id = std::move(pendingTheme_);
+        pendingTheme_.clear();
+        followNereus_ = pendingFollow_;
+        const auto before = ui::currentThemeInfo();
+        if (ui::applyTheme(id)) {
+            savePreference("theme", followNereus_ ? "" : id);
+            const auto &after = ui::currentThemeInfo();
+            if (after.fontFamily != before.fontFamily || after.fontPoints != before.fontPoints ||
+                after.fontRegular != before.fontRegular)
+                pendingScale_ = uiScale_;
+        }
+    }
+    if (pendingScale_ > 0) {
+        uiScale_ = pendingScale_;
+        pendingScale_ = 0;
+        ui::setInterfaceScale(uiScale_);
+        window_->loadFonts(uiScale_, ui::currentThemeInfo(), content_ / "fonts");
+    }
+}
+
+// The mark (black strokes on clear) as an alpha texture, drawn tinted in the theme's ink.
+unsigned App::logoTexture() {
+    if (logo_)
+        return logo_;
+    std::vector<unsigned char> rgba;
+    if (!readPng(content_ / "icons/notgroot_mark.png", logoWidth_, logoHeight_, rgba))
+        return 0;
+    for (std::size_t i = 0; i < rgba.size(); i += 4)
+        rgba[i] = rgba[i + 1] = rgba[i + 2] = 255;
+    glGenTextures(1, &logo_);
+    glBindTexture(GL_TEXTURE_2D, logo_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, logoWidth_, logoHeight_, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    return logo_;
+}
+
+int App::run() {
+    while (!window_->closing()) {
+        applyPending();
+        window_->beginFrame();
+        frame();
+        ++frameCount_;
+        const bool last = opt_.frames > 0 && frameCount_ >= opt_.frames;
+        window_->present(last ? opt_.screenshot : fs::path());
+        window_->swap();
+        if (last)
+            break;
+    }
+    return 0;
+}
+
+void App::frame() {
+    menuBar();
+    dockspace();
+    aboutWindow();
+}
+
+void App::dockspace() {
+    const ImGuiViewport *viewport = ImGui::GetMainViewport();
+    ImGui::DockSpaceOverViewport(ImGui::GetID("notgroot_dock"), viewport, ImGuiDockNodeFlags_PassthruCentralNode);
+}
+
+void App::menuBar() {
+    if (!ImGui::BeginMainMenuBar())
+        return;
+    if (ImGui::BeginMenu("File")) {
+        if (ImGui::MenuItem("Quit", "Ctrl+Q"))
+            window_->requestClose();
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("View")) {
+        if (ImGui::BeginMenu("Theme")) {
+            if (ImGui::MenuItem("Follow Nereus", nullptr, followNereus_)) {
+                followNereus_ = true;
+                savePreference("theme", "");
+                setTheme(preferredTheme(), true);
+            }
+            ImGui::Separator();
+            for (const auto &theme : ui::themes()) {
+                if (ImGui::MenuItem(theme.label.c_str(), nullptr, theme.id == ui::currentTheme()))
+                    setTheme(theme.id, false);
+                if (ImGui::IsItemHovered() && !theme.description.empty())
+                    ImGui::SetTooltip("%s", theme.description.c_str());
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Interface scale")) {
+            for (float scale : {0.f, .8f, .9f, 1.f, 1.1f, 1.25f, 1.5f, 1.75f, 2.f}) {
+                char label[32];
+                if (scale == 0)
+                    std::snprintf(label, sizeof(label), "Match the desktop");
+                else
+                    std::snprintf(label, sizeof(label), "%.0f %%", double(scale * 100));
+                if (ImGui::MenuItem(label)) {
+                    pendingScale_ = scale > 0 ? scale : window_->contentScale();
+                    savePreference("interface_scale", scale > 0 ? std::to_string(scale) : "auto");
+                }
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Help")) {
+        if (ImGui::MenuItem("About notgroot"))
+            showAbout_ = true;
+        ImGui::EndMenu();
+    }
+    ImGui::EndMainMenuBar();
+
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Q, ImGuiInputFlags_RouteGlobal))
+        window_->requestClose();
+}
+
+void App::aboutWindow() {
+    if (!showAbout_)
+        return;
+    ImGui::SetNextWindowSize(ui::ui(ImVec2(420, 0)), ImGuiCond_Appearing);
+    if (ImGui::Begin("About notgroot", &showAbout_, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse)) {
+        if (const unsigned texture = logoTexture()) {
+            const float height = ui::ui(72), width = height * float(logoWidth_) / float(logoHeight_);
+            ImGui::ImageWithBg(ImTextureID(texture), {width, height}, {0, 0}, {1, 1}, {0, 0, 0, 0}, ui::palette().text);
+        }
+        ImGui::PushFont(ui::typeRamp().number);
+        ImGui::TextUnformatted("notgroot");
+        ImGui::PopFont();
+        ImGui::TextDisabled("version " NOTGROOT_VERSION);
+        ui::emptyState("Anything but Groot: a keyboard-first editor for BehaviorTree.CPP 4 trees. Logo after Groot's "
+                       "tree icon (MIT, Fundacio Eurecat).");
+    }
+    ImGui::End();
+}
+} // namespace notgroot::app

@@ -1,0 +1,57 @@
+// The editor application: one window with the menu bar, a dockspace holding the panels, and the preferences
+// (theme, scale, layout, recent workspaces) kept in the config directory.
+#pragma once
+#include "window.hpp"
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace notgroot::app {
+struct Options {
+    std::filesystem::path open;       // a trees directory or a tree file to open at start
+    std::string theme;                // --theme: overrides the preferences for this run
+    std::filesystem::path screenshot; // --screenshot: save the frame after `frames` frames, then quit
+    int frames = 0;                   // --frames: quit after this many frames (0: run until closed)
+    bool persist = true;              // --no-persist: read and write no preferences (tests, screenshots)
+};
+
+class App {
+  public:
+    explicit App(Options);
+    ~App();
+    int run();
+
+  private:
+    void frame();
+    void menuBar();
+    void aboutWindow();
+    void dockspace();
+
+    // Theme: --theme, else the theme picked here (notgroot.yaml), else Nereus's (nereus/viewer.yaml), else
+    // timing-board. Changes apply between frames.
+    std::string preferredTheme() const;
+    void setTheme(const std::string &id, bool follow);
+    void applyPending();
+    void savePreference(const char *key, const std::string &value);
+    std::string preference(const char *key) const;
+
+    unsigned logoTexture();
+
+    Options opt_;
+    std::unique_ptr<Window> window_;
+    std::filesystem::path content_, config_;
+    std::string pendingTheme_;
+    bool pendingFollow_ = false, followNereus_ = true;
+    float uiScale_ = 1, pendingScale_ = 0;
+    bool showAbout_ = false;
+    unsigned logo_ = 0;
+    int logoWidth_ = 0, logoHeight_ = 0;
+    int frameCount_ = 0;
+};
+
+// The content directory (themes, fonts, icons): the source tree's in a build, share/notgroot once installed.
+std::filesystem::path contentDirectory();
+// $XDG_CONFIG_HOME, else ~/.config (empty when neither is known).
+std::filesystem::path configHome();
+} // namespace notgroot::app
