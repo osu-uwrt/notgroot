@@ -47,7 +47,9 @@ saving writes only the files you changed. Includes are recomputed on save, so yo
     ones deeper), Force/AlwaysSuccess green, Force/AlwaysFailure red, other decorators (Inverter, Repeat, Retry,
     Timeout) yellow, conditions green.
   - Subtree calls have a dashed border.
-  - Each port shows IN / OUT / IO, and values that are `{keys}` are drawn in that key's own color everywhere.
+  - Each port shows IN / OUT / IO, and values that are `{keys}` are drawn in that key's own color everywhere. A
+    tree's keys are colored together, so no two look alike (up to 20 keys stay well apart in every theme; larger
+    trees get as much spread as the theme's readable colors allow).
   - Space, or the round button under a call, opens a subtree in place, grayed on a band of its color because it is
     read-only there; calls inside it open the same way. Double-click or Ctrl+Enter opens it in its own tab.
   - Selection: Ctrl/Shift+click, Shift+drag for a box, and keys for siblings, a whole branch or every node of one
@@ -63,6 +65,7 @@ saving writes only the files you changed. Includes are recomputed on save, so yo
   - **Globals:** set before the tree runs, usable anywhere in it, with no nodes on the canvas (one hidden `Script`,
     contract section 5). Edit them in place; a value can use other globals and inputs (`{object}_frame`), and
     notgroot writes them in the order that needs, refusing globals that use each other in a circle (shown in red).
+    After a `{`, the rest of the nearest key shows in gray; Tab takes it and closes the brace.
     Right-click a `SetBlackboardV3` or `Format` and choose Make global to turn it into one.
   - **Locals:** every key bound while the tree runs (a node's `{key}`, a setter, a script), with reads and writes,
     and whether it is never set or never read.

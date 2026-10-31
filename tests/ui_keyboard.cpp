@@ -1,6 +1,7 @@
 // The editor driven by the keyboard alone, headless: a real ImGui context and the real panels, with key presses and
 // typed text injected frame by frame, checked against the files that come out.
 #include "notgroot/ui/panels.hpp"
+#include "notgroot/ui/style.hpp"
 #include "notgroot/ui/theme.hpp"
 #include "test_support.hpp"
 #include <fstream>
@@ -342,4 +343,33 @@ TEST_F(Harness, MakeGlobalFromTheNodeMenu) {
     frames(2);
     EXPECT_EQ(cursorId(), "Sequence");
     EXPECT_FALSE(ui::Session::applies(*session.command("node.makeGlobal")));
+}
+
+// Key colors in one tree stay apart in every theme: the full distance for up to 20 keys, and still apart for 47 (the
+// most any tree has); the same keys get the same colors, whatever their order.
+TEST_F(Harness, KeyColorsStayApartInEveryTheme) {
+    ui::loadThemes(NOTGROOT_THEMES);
+    const auto keys = [](int n) {
+        std::vector<std::string> list;
+        for (int i = 0; i < n; ++i)
+            list.push_back("key_" + std::to_string(i * 7919 % 1000));
+        return list;
+    };
+    const auto least = [](const std::map<std::string, ImVec4> &colors) {
+        float apart = 1e9f;
+        for (auto a = colors.begin(); a != colors.end(); ++a)
+            for (auto b = std::next(a); b != colors.end(); ++b)
+                apart = std::min(apart, ui::colorDistance(a->second, b->second));
+        return apart;
+    };
+    for (const auto &theme : ui::themes()) {
+        ASSERT_TRUE(ui::applyTheme(theme.id));
+        EXPECT_GE(least(ui::keyColors(keys(20))), ui::keyColorDistance) << theme.id;
+        EXPECT_GE(least(ui::keyColors(keys(47))), 4.f) << theme.id;
+    }
+    auto reversed = keys(30);
+    std::reverse(reversed.begin(), reversed.end());
+    const auto a = ui::keyColors(keys(30)), b = ui::keyColors(reversed);
+    for (const auto &[key, color] : a)
+        EXPECT_EQ(ui::colorDistance(color, b.at(key)), 0.f) << key;
 }

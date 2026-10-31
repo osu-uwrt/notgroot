@@ -3,6 +3,7 @@
 #pragma once
 #include "notgroot/core/models.hpp"
 #include <imgui.h>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -30,8 +31,14 @@ void setNodeIcon(const std::string &name, ImTextureID);
 ImTextureID nodeIcon(const char *name);
 // Ink that reads on a category's fill.
 ImVec4 inkOnCategory(core::Category);
-// A blackboard key's color: hue from its name, lightness for the theme's paper.
-ImVec4 keyColor(const std::string &key);
+// The colors of one tree's keys, chosen together from the theme's readable, saturated colors: each starts near a hue
+// its name picks, then all are spread as far apart as they go (CIE94, lightness counting half, so hue tells them
+// apart first). Up to 20 keys stay at least keyColorDistance apart in every theme; a tree with more gets the most
+// spread the theme's colors allow.
+constexpr float keyColorDistance = 8;
+std::map<std::string, ImVec4> keyColors(std::vector<std::string> keys);
+// How far apart two colors look (CIE94, lightness counting half).
+float colorDistance(ImVec4, ImVec4);
 // Port direction badge colors: in green, out orange, in-out the accent.
 ImVec4 directionColor(core::PortDirection);
 const char *directionBadge(core::PortDirection); // IN, OUT, IO

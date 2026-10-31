@@ -77,7 +77,7 @@ void valueField(Session &session, const NodeRef &ref, const std::string &name, c
     const bool key = toggle && isKeyReference(value);
     if (toggle) {
         if (key)
-            ImGui::PushStyleColor(ImGuiCol_Button, withAlpha(keyColor(keyOf(value)), .35f));
+            ImGui::PushStyleColor(ImGuiCol_Button, withAlpha(session.keyColor(ref.tree, keyOf(value)), .35f));
         if (ImGui::SmallButton(("{}##toggle_" + name).c_str())) {
             if (key)
                 session.edited(session.editor.setAttribute(ref, name, keyOf(value)));
@@ -95,7 +95,7 @@ void valueField(Session &session, const NodeRef &ref, const std::string &name, c
         ImGui::SetKeyboardFocusHere();
     ImGui::SetNextItemWidth(-FLT_MIN);
     if (key)
-        ImGui::PushStyleColor(ImGuiCol_Text, keyColor(keyOf(value)));
+        ImGui::PushStyleColor(ImGuiCol_Text, session.keyColor(ref.tree, keyOf(value)));
     ImGuiInputTextFlags flags =
         ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackAlways | ImGuiInputTextFlags_CallbackHistory;
     const bool showing = completion.field == field && !completion.options.empty();
@@ -138,7 +138,8 @@ void valueField(Session &session, const NodeRef &ref, const std::string &name, c
         for (std::size_t i = 0; i < completion.options.size(); ++i) {
             const auto &option = completion.options[i];
             const bool on = int(i) == completion.selected;
-            ImGui::TextColored(on ? palette().accent : keyColor(option), "%s{%s}", on ? "› " : "  ", option.c_str());
+            ImGui::TextColored(on ? palette().accent : session.keyColor(session.active, option), "%s{%s}",
+                               on ? "› " : "  ", option.c_str());
         }
         ImGui::TextDisabled("Tab or Enter takes it, ↑↓ choose");
         ImGui::End();
@@ -197,7 +198,7 @@ void treeInspector(Session &session, const std::string &key) {
         for (const auto &port : model.ports) {
             ImGui::TextColored(directionColor(port.direction), "%-3s", directionBadge(port.direction));
             ImGui::SameLine();
-            ImGui::TextColored(keyColor(port.name), "%s", port.name.c_str());
+            ImGui::TextColored(session.keyColor(key, port.name), "%s", port.name.c_str());
             if (!port.description.empty()) {
                 ImGui::SameLine();
                 ImGui::TextDisabled("%s", port.description.c_str());

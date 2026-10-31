@@ -171,7 +171,7 @@ void drawFinder(Session &session) {
                 all.push_back({Target::Key,
                                {"{" + name + "}",
                                 std::to_string(info.reads) + " reads, " + std::to_string(info.writes) + " writes", "",
-                                keyColor(name), 20},
+                                session.keyColor(session.active, name), 20},
                                session.active,
                                name,
                                "",

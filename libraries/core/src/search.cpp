@@ -78,4 +78,23 @@ Match fuzzyMatch(std::string_view query, std::string_view text) {
     }
     return result;
 }
+std::string keyCompletion(std::string_view text, std::size_t cursor, const std::vector<std::string> &keys) {
+    cursor = std::min(cursor, text.size());
+    const auto before = text.substr(0, cursor);
+    const auto open = before.rfind('{');
+    if (open == std::string_view::npos)
+        return {};
+    const auto typed = before.substr(open + 1);
+    if (!std::all_of(typed.begin(), typed.end(),
+                     [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; }))
+        return {};
+    const std::string *match = nullptr;
+    for (const auto &key : keys)
+        if (key.compare(0, typed.size(), typed) == 0 && (!match || key < *match))
+            match = &key;
+    if (!match)
+        return {};
+    const bool closed = cursor < text.size() && text[cursor] == '}';
+    return match->substr(typed.size()) + (closed ? "" : "}");
+}
 } // namespace notgroot::core

@@ -104,6 +104,8 @@ class Session {
 
     // A key highlighted on the canvas (from the variables panel or the finder).
     std::string highlightKey;
+    // A key's color in its tree: the tree's keys are colored together, so each stays easy to tell apart.
+    ImVec4 keyColor(const std::string &tree, const std::string &key);
     std::vector<std::string> globalCycle; // globals the last refused edit would have put in a circle
 
     // --- after an edit ---
@@ -183,6 +185,12 @@ class Session {
     std::vector<core::Problem> problems_;
     std::map<core::NodeRef, int> severity_;
     std::map<std::string, std::pair<unsigned, core::TreeVariables>> variables_;
+    struct KeyColors {
+        unsigned version = ~0u;
+        std::string theme;
+        std::map<std::string, ImVec4> colors;
+    };
+    std::map<std::string, KeyColors> keyColors_;
 };
 
 // ImGui text input on a std::string.

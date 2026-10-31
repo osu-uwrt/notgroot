@@ -14,4 +14,7 @@ struct Match {
 };
 
 Match fuzzyMatch(std::string_view query, std::string_view text);
+// Typing a key after "{": what completes it at `cursor` (the rest of the first key, by name, that starts with what
+// was typed, then "}" unless one follows), or "" when the cursor isn't in a key or nothing matches.
+std::string keyCompletion(std::string_view text, std::size_t cursor, const std::vector<std::string> &keys);
 } // namespace notgroot::core

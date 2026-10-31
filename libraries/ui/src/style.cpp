@@ -2,6 +2,7 @@
 #include "notgroot/ui/style.hpp"
 #include "notgroot/ui/theme.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <map>
 
@@ -46,8 +47,8 @@ void dismissible(bool &open) {
     if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
         open = false;
     const bool clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right);
-    if (clicked && !ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows |
-                                           ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
+    if (clicked &&
+        !ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
         open = false;
 }
 
@@ -163,17 +164,130 @@ ImVec4 inkOnCategory(core::Category category) {
     return inkOn(categoryColor(category), {1, 1, 1, 1}, 3.f);
 }
 
-ImVec4 keyColor(const std::string &key) {
-    const float hue = float(hash(key) % 360) / 360.f;
-    float r = 0, g = 0, b = 0;
-    // Bright on dark paper, deep on light; nudged until it reads on the card body.
-    const bool dark = darkTheme();
-    ImGui::ColorConvertHSVtoRGB(hue, dark ? .5f : .75f, dark ? .95f : .55f, r, g, b);
-    ImVec4 color{r, g, b, 1};
+namespace {
+std::array<float, 3> lab(ImVec4 c) {
+    const auto linear = [](float v) { return v <= .04045f ? v / 12.92f : std::pow((v + .055f) / 1.055f, 2.4f); };
+    const float r = linear(c.x), g = linear(c.y), b = linear(c.z);
+    // sRGB to XYZ (D65), then to Lab.
+    const float x = (.4124f * r + .3576f * g + .1805f * b) / .95047f, y = .2126f * r + .7152f * g + .0722f * b,
+                z = (.0193f * r + .1192f * g + .9505f * b) / 1.08883f;
+    const auto f = [](float t) { return t > .008856f ? std::cbrt(t) : 7.787f * t + 16.f / 116; };
+    return {116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))};
+}
+
+// CIE94 (textiles: lightness counts half, so hue sets keys apart first); symmetric, on the mean chroma.
+float cie94(const std::array<float, 3> &p, const std::array<float, 3> &q) {
+    const float c1 = std::hypot(p[1], p[2]), c2 = std::hypot(q[1], q[2]), c = (c1 + c2) / 2;
+    const float dl = p[0] - q[0], dc = c1 - c2, da = p[1] - q[1], db = p[2] - q[2];
+    const float dh2 = std::max(0.f, da * da + db * db - dc * dc);
+    const float sc = 1 + .048f * c, sh = 1 + .014f * c;
+    return std::sqrt((dl / 2) * (dl / 2) + (dc / sc) * (dc / sc) + dh2 / (sh * sh));
+}
+
+// Readable key colors for the theme: every 5° of hue at a few strengths, each nudged until it reads on the paper.
+const std::vector<std::pair<float, ImVec4>> &keyCandidates() {
+    static std::vector<std::pair<float, ImVec4>> candidates;
+    static std::string theme;
+    static float paperLight = -1;
     const ImVec4 paper = ImGui::GetStyle().Colors[ImGuiCol_FrameBg];
-    for (int i = 0; i < 6 && contrastRatio(color, paper) < 4.5f; ++i)
-        color = mix(color, dark ? ImVec4(1, 1, 1, 1) : ImVec4(0, 0, 0, 1), .2f);
-    return color;
+    if (theme == currentTheme() && paperLight == paper.x + paper.y + paper.z)
+        return candidates;
+    theme = currentTheme();
+    paperLight = paper.x + paper.y + paper.z;
+    candidates.clear();
+    const bool dark = darkTheme();
+    // Strengths of each hue; then only colors that read as a color (not as gray text) and sit in a lightness band
+    // that reads on the paper.
+    const float tiers[][2] = {{.55f, 1.f}, {.8f, 1.f}, {.45f, .9f}, {.75f, .85f}, {.95f, .95f}};
+    const float lightTiers[][2] = {{.75f, .55f}, {1.f, .45f}, {.6f, .45f}, {1.f, .7f}, {.85f, .35f}};
+    for (int tier = 0; tier < 5; ++tier)
+        for (int degrees = 0; degrees < 360; degrees += 4) {
+            float r = 0, g = 0, b = 0;
+            const auto &sv = dark ? tiers[tier] : lightTiers[tier];
+            ImGui::ColorConvertHSVtoRGB(float(degrees) / 360, sv[0], sv[1], r, g, b);
+            ImVec4 color{r, g, b, 1};
+            for (int i = 0; i < 6 && contrastRatio(color, paper) < 4.5f; ++i)
+                color = mix(color, dark ? ImVec4(1, 1, 1, 1) : ImVec4(0, 0, 0, 1), .2f);
+            const auto l = lab(color);
+            const bool lit = dark ? l[0] >= 55 && l[0] <= 88 : l[0] >= 25 && l[0] <= 55;
+            if (std::hypot(l[1], l[2]) >= 30 && lit && contrastRatio(color, paper) >= 4.5f)
+                candidates.push_back({float(degrees + tier * 1000), color});
+        }
+    return candidates;
+}
+} // namespace
+
+float colorDistance(ImVec4 a, ImVec4 b) {
+    return cie94(lab(a), lab(b));
+}
+
+std::map<std::string, ImVec4> keyColors(std::vector<std::string> keys) {
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    const auto &candidates = keyCandidates();
+    std::vector<std::array<float, 3>> labs;
+    for (const auto &[tag, color] : candidates)
+        labs.push_back(lab(color));
+    std::vector<bool> taken(candidates.size(), false);
+    std::vector<std::size_t> chosen;
+    std::map<std::string, ImVec4> colors;
+    for (const auto &key : keys) {
+        const float preferred = float(hash(key) % 360);
+        // How far each candidate is from the colors already given. The farthest set the bar; among the candidates
+        // close to it (or far enough anyway), the one nearest the hue the name picks.
+        std::vector<float> apart(candidates.size(), 1e9f);
+        float farthest = 0;
+        for (std::size_t i = 0; i < candidates.size(); ++i) {
+            if (taken[i])
+                continue;
+            for (const auto j : chosen)
+                apart[i] = std::min(apart[i], cie94(labs[i], labs[j]));
+            farthest = std::max(farthest, apart[i]);
+        }
+        const float bar = farthest * .98f;
+        std::size_t best = 0;
+        float bestNear = 1e9f;
+        for (std::size_t i = 0; i < candidates.size(); ++i) {
+            if (taken[i] || apart[i] < bar)
+                continue;
+            const float hue = std::fmod(candidates[i].first, 1000.f);
+            const float near = std::min(std::abs(hue - preferred), 360 - std::abs(hue - preferred)) +
+                               (candidates[i].first >= 1000 ? 30 : 0); // the first strength first
+            if (near < bestNear) {
+                best = i;
+                bestNear = near;
+            }
+        }
+        taken[best] = true;
+        chosen.push_back(best);
+    }
+
+    // Then each in turn moves to the free color farthest from all the others, a few rounds: picking one at a time
+    // leaves the first ones crowded by the later ones.
+    const auto distance = [&](std::size_t i, std::size_t j) { return cie94(labs[i], labs[j]); };
+    for (int round = 0; round < 4 && chosen.size() > 1; ++round)
+        for (std::size_t k = 0; k < chosen.size(); ++k) {
+            const auto nearest = [&](std::size_t i) {
+                float least = 1e9f;
+                for (std::size_t other = 0; other < chosen.size(); ++other)
+                    if (other != k)
+                        least = std::min(least, distance(i, chosen[other]));
+                return least;
+            };
+            std::size_t best = chosen[k];
+            float bestApart = nearest(best);
+            for (std::size_t i = 0; i < candidates.size(); ++i)
+                if (!taken[i] && nearest(i) > bestApart + .5f) {
+                    best = i;
+                    bestApart = nearest(i);
+                }
+            taken[chosen[k]] = false;
+            taken[best] = true;
+            chosen[k] = best;
+        }
+    for (std::size_t k = 0; k < keys.size(); ++k)
+        colors[keys[k]] = candidates[chosen[k]].second;
+    return colors;
 }
 
 ImVec4 directionColor(core::PortDirection direction) {

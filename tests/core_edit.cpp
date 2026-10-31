@@ -372,7 +372,7 @@ TEST_F(Fixture, ToyWorkspaceIsValid) {
 
 TEST_F(Fixture, ValidationFindsBtcppErrors) {
     auto *info = resolve(workspace, sequence().child(2));
-    info->set("tint", "red");                   // not a port
+    info->set("tint", "red");                     // not a port
     info->append(std::make_unique<Element>("X")); // a leaf with a child, and an unknown node
     workspace.reindex();
     int errors = 0;
@@ -428,4 +428,15 @@ TEST(Search, FuzzyPrefersWordStartsAndRuns) {
     EXPECT_EQ(match.positions, (std::vector<int>{0, 4}));
     EXPECT_TRUE(fuzzyMatch("", "anything").matched);
     EXPECT_FALSE(fuzzyMatch("D", "dive").matched); // an uppercase query letter must match case
+}
+
+TEST(Search, KeyCompletionAfterABrace) {
+    const std::vector<std::string> keys{"object_name", "object", "depth"};
+    EXPECT_EQ(keyCompletion("{obj", 4, keys), "ect}"); // the first by name: object
+    EXPECT_EQ(keyCompletion("{object_n", 9, keys), "ame}");
+    EXPECT_EQ(keyCompletion("x_{d}", 4, keys), "epth"); // a brace already closes it
+    EXPECT_EQ(keyCompletion("{", 1, keys), "depth}");
+    EXPECT_EQ(keyCompletion("{object}_frame", 14, keys), ""); // not in a key
+    EXPECT_EQ(keyCompletion("{zz", 3, keys), "");
+    EXPECT_EQ(keyCompletion("a b{x y", 7, keys), "");
 }

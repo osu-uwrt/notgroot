@@ -545,8 +545,10 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
         const float line = m.body->FontSize * z;
         if (row.value == "{" + session.highlightKey + "}" || mentions(row.value, session.highlightKey) ||
             rowWritesKey(row, session.highlightKey))
-            draw->AddRectFilled({a.x + 2 * z, y - m.rowGap * z / 2}, {b.x - 2 * z, y + line + m.rowGap * z / 2},
-                                ImGui::GetColorU32(withAlpha(keyColor(session.highlightKey), .18f)), ui(2) * z);
+            draw->AddRectFilled(
+                {a.x + 2 * z, y - m.rowGap * z / 2}, {b.x - 2 * z, y + line + m.rowGap * z / 2},
+                ImGui::GetColorU32(withAlpha(session.keyColor(card.key.ref.tree, session.highlightKey), .18f)),
+                ui(2) * z);
         const ImVec4 badgeInk = row.special   ? palette().muted
                                 : row.modeled ? directionColor(row.direction)
                                               : palette().error;
@@ -559,7 +561,7 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
         const float valueX = b.x - m.pad * z - drawnWidth(view, value);
         ImVec4 ink = palette().text;
         if (isKeyReference(value))
-            ink = keyColor(keyOf(value));
+            ink = session.keyColor(card.key.ref.tree, keyOf(value));
         else if (row.missing)
             ink = withAlpha(palette().muted, .6f);
         text(draw, view.body, view.bodySize, {valueX, y}, ImGui::GetColorU32(withAlpha(ink, alpha)), value.c_str());
@@ -585,7 +587,7 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
     if ((severity == 0 || severity == 1) && !card.floating)
         ring(severityColor(severity), std::max(1.5f, ui(2) * z), ui(1) * z);
     if (keyed)
-        ring(keyColor(session.highlightKey), std::max(1.5f, ui(2) * z), ui(3) * z);
+        ring(session.keyColor(card.key.ref.tree, session.highlightKey), std::max(1.5f, ui(2) * z), ui(3) * z);
     if (matched)
         ring(palette().change, std::max(1.5f, ui(2) * z), ui(3) * z);
     if (picked)

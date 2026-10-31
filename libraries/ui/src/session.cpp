@@ -1,5 +1,7 @@
 // Session: shared editor state and the commands.
 #include "notgroot/ui/session.hpp"
+#include "notgroot/ui/style.hpp"
+#include "notgroot/ui/theme.hpp"
 #include <algorithm>
 #include <imgui_internal.h>
 
@@ -270,6 +272,18 @@ const TreeVariables &Session::variables(const std::string &key) {
         cached.second = analyzeVariables(workspace, key);
     }
     return cached.second;
+}
+
+ImVec4 Session::keyColor(const std::string &tree, const std::string &key) {
+    auto &cached = keyColors_[tree];
+    if (cached.version != workspace.version() || cached.theme != currentTheme()) {
+        std::vector<std::string> keys;
+        for (const auto &[name, info] : variables(tree).keys)
+            keys.push_back(name);
+        cached = {workspace.version(), currentTheme(), keyColors(keys)};
+    }
+    const auto found = cached.colors.find(key);
+    return found != cached.colors.end() ? found->second : keyColors({key}).begin()->second;
 }
 
 void Session::pick(PickFor purpose) {

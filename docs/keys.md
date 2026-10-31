@@ -100,6 +100,9 @@ refused while any node floats; the message lists the trees, and clicking one goe
 
 The `{}` button beside a value turns text into a key (`2` → `{2}`) and back.
 
+In the Variables panel's Globals, typing after `{` shows the rest of the nearest input or global in gray; Tab takes
+it and closes the brace.
+
 ## Trees and keys
 
 | Key | Edit |

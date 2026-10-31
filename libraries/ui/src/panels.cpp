@@ -193,6 +193,60 @@ void drawPalette(Session &session) {
     ImGui::EndChild();
 }
 
+namespace {
+// Typing a key after "{": the rest of the first key that starts that way, shown in gray; Tab takes it and closes the
+// brace.
+struct Suggestion {
+    std::string *text;
+    const std::vector<std::string> *keys;
+    std::string rest; // what Tab would add (the key's rest and "}")
+    int cursor = 0;
+};
+
+int suggest(ImGuiInputTextCallbackData *data) {
+    auto *s = static_cast<Suggestion *>(data->UserData);
+    if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
+        s->text->resize(std::size_t(data->BufTextLen));
+        data->Buf = s->text->data();
+        return 0;
+    }
+    const std::string_view text(data->Buf, std::size_t(data->BufTextLen));
+    s->rest = keyCompletion(text, std::size_t(data->CursorPos), *s->keys);
+    s->cursor = data->CursorPos;
+    if (data->EventFlag == ImGuiInputTextFlags_CallbackCompletion) {
+        const bool closed = data->CursorPos < data->BufTextLen && data->Buf[data->CursorPos] == '}';
+        if (!s->rest.empty())
+            data->InsertChars(data->CursorPos, s->rest.c_str());
+        else if (closed)
+            data->CursorPos += 1; // a whole key typed already: Tab steps past its brace
+        if (closed && !s->rest.empty())
+            data->CursorPos += 1;
+        s->rest.clear();
+    }
+    return 0;
+}
+
+bool keyField(const char *id, const char *hint, std::string &text, const std::vector<std::string> &keys,
+              ImGuiInputTextFlags flags = 0) {
+    Suggestion s{&text, &keys, "", 0};
+    const bool done =
+        ImGui::InputTextWithHint(id, hint, text.data(), text.capacity() + 1,
+                                 flags | ImGuiInputTextFlags_CallbackResize | ImGuiInputTextFlags_CallbackAlways |
+                                     ImGuiInputTextFlags_CallbackCompletion,
+                                 suggest, &s);
+    if (ImGui::IsItemActive() && !s.rest.empty()) {
+        const auto &style = ImGui::GetStyle();
+        const float x =
+            ImGui::GetItemRectMin().x + style.FramePadding.x +
+            ImGui::CalcTextSize(text.c_str(), text.c_str() + std::min<std::size_t>(std::size_t(s.cursor), text.size()))
+                .x;
+        ImGui::GetWindowDrawList()->AddText({x, ImGui::GetItemRectMin().y + style.FramePadding.y},
+                                            ImGui::GetColorU32(ImGuiCol_TextDisabled), s.rest.c_str());
+    }
+    return done;
+}
+} // namespace
+
 void drawVariables(Session &session) {
     if (session.active.empty()) {
         emptyState("Open a tree to see its blackboard keys.");
@@ -213,7 +267,7 @@ void drawVariables(Session &session) {
 
     // A key's name: its color, a click highlights it, a double-click goes to its first use, F2 renames it.
     const auto keyCell = [&](const KeyInfo &key) {
-        chip(keyColor(key.name));
+        chip(session.keyColor(session.active, key.name));
         const bool circular =
             std::find(session.globalCycle.begin(), session.globalCycle.end(), key.name) != session.globalCycle.end();
         if (circular)
@@ -262,6 +316,11 @@ void drawVariables(Session &session) {
         if (inputs.empty())
             ImGui::TextDisabled("No ports: Tree > Edit subtree ports adds them");
         else if (ImGui::BeginTable("##inputs", 4, flags)) {
+            ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Reads", ImGuiTableColumnFlags_WidthFixed);
+            ImGui::TableSetupColumn("Writes", ImGuiTableColumnFlags_WidthFixed);
+            ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed);
+            tableHeaders();
             for (const auto *key : inputs) {
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
@@ -277,6 +336,11 @@ void drawVariables(Session &session) {
     // Globals: set before the tree runs, in the order their values need. No nodes: one Script the editor keeps.
     if (header("Globals", globals.size())) {
         const auto all = readGlobals(*entry->tree).globals;
+        // What a global's value can name: the inputs and the other globals (locals don't exist yet).
+        std::vector<std::string> usable;
+        for (const auto &[name, key] : variables.keys)
+            if (key.scope != Scope::Local)
+                usable.push_back(name);
         const auto apply = [&](const std::vector<Global> &list, const std::string &what) {
             if (session.editor.setGlobals(session.active, list)) {
                 session.globalCycle.clear();
@@ -293,6 +357,7 @@ void drawVariables(Session &session) {
             ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthStretch, 1);
             ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 1.6f);
             ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed);
+            tableHeaders();
             for (const auto *key : globals) {
                 ImGui::PushID(key->name.c_str());
                 ImGui::TableNextRow();
@@ -303,7 +368,7 @@ void drawVariables(Session &session) {
                 static std::map<std::string, std::string> editing;
                 auto &value = editing.try_emplace(key->name, key->value).first->second;
                 ImGui::SetNextItemWidth(-FLT_MIN);
-                inputStringWithHint("##value", "text, {key}…", value);
+                keyField("##value", "text, {key}…", value, usable);
                 if (ImGui::IsItemDeactivatedAfterEdit() && value != key->value) {
                     auto list = all;
                     for (auto &global : list)
@@ -333,10 +398,12 @@ void drawVariables(Session &session) {
         ImGui::SetNextItemWidth(ui(130));
         bool add = inputStringWithHint("##newname", "new global", name, ImGuiInputTextFlags_EnterReturnsTrue);
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(-ui(60));
-        add |= inputStringWithHint("##newvalue", "value", value, ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - ImGui::GetStyle().ItemSpacing.x);
+        add |= keyField("##newvalue", "value, {key}…", value, usable, ImGuiInputTextFlags_EnterReturnsTrue);
         ImGui::SameLine();
-        add |= ImGui::Button("+ Global");
+        add |= ImGui::Button("+", {ImGui::GetFrameHeight(), 0});
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Add the global");
         if (add && !name.empty()) {
             auto list = all;
             list.push_back({name, value});
