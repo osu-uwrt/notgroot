@@ -1,6 +1,7 @@
 // Structural validation.
 #include "notgroot/core/validate.hpp"
 #include "notgroot/core/variables.hpp"
+#include <cstdlib>
 #include <functional>
 #include <set>
 
@@ -65,6 +66,21 @@ void checkNode(const Workspace &workspace, const Document &document, const Eleme
         if (isKeyReference(value) && keyOf(value).find_first_of("{}") != std::string::npos)
             add(Severity::Warning, name + ": a value that starts with { and ends with } is one key", name);
     }
+    // BehaviorTree.CPP 4 gives a key passed into a subtree as text the type the text looks like ("2": int); a node
+    // in the subtree reading it as text (every std::string port) then fails the tree's load.
+    if (call)
+        for (const auto &attribute : node.attributes) {
+            if (isReservedAttribute(attribute.name) || isKeyReference(attribute.value) || attribute.value.empty())
+                continue;
+            const auto &v = attribute.value;
+            char *end = nullptr;
+            std::strtod(v.c_str(), &end);
+            if ((end && *end == '\0') || v == "true" || v == "false")
+                add(Severity::Warning,
+                    attribute.name + "=\"" + v + "\": BehaviorTree.CPP types this key as a number or bool inside " +
+                        id + "; a node there reading it as text fails to load. Pass a {key} instead",
+                    attribute.name);
+        }
     if (call && model)
         for (const auto &port : model->ports)
             if (!node.has(port.name))

@@ -189,6 +189,45 @@ void drawVariables(Session &session) {
     ImGui::SameLine();
     ImGui::TextDisabled("(F2 renames the highlighted key)");
 
+    // Declare: a SetBlackboardV3 (the converted trees' way; else BT.CPP's SetBlackboard) just before the cursor.
+    static std::string declare;
+    ImGui::SetNextItemWidth(ui(180));
+    const bool enter = inputStringWithHint("##declare", "new key", declare, ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine();
+    if ((ImGui::Button("Declare") || enter) && !declare.empty()) {
+        NodeModel setter;
+        if (session.model("SetBlackboardV3", setter) || session.model("SetBlackboard", setter)) {
+            auto node = makeNode(setter);
+            node->set("output_key", declare);
+            node->set("value", "");
+            auto *at = resolve(session.workspace, session.cursor.ref);
+            NodeRef made;
+            if (session.cursor.readOnly() || !at)
+                session.status("Put the cursor in this tree first", true);
+            else if (session.cursor.ref.isTree() || session.cursor.ref.path.size() == 1) {
+                // On the tree or its root node: first child of the root node.
+                const auto roots = nodeChildren(*resolve(session.workspace, {session.active, {}}));
+                if (roots.empty())
+                    session.status("The tree is empty: add its root node first (Tab)", true);
+                else
+                    made = session.editor.insert(refOf(session.workspace, roots.front()), 0, std::move(node),
+                                                 "Declare " + declare);
+            } else {
+                const auto siblings = nodeChildren(*at->parent);
+                const auto index = std::size_t(std::find(siblings.begin(), siblings.end(), at) - siblings.begin());
+                made = session.editor.insert(session.cursor.ref.parent(), index, std::move(node), "Declare " + declare);
+            }
+            session.edited(made);
+            if (!made.empty()) {
+                session.highlightKey = declare;
+                session.focusInspector = true;
+                session.focusPort = "value";
+                session.focusCanvas = false;
+                declare.clear();
+            }
+        }
+    }
+
     const auto &variables = session.variables(session.active);
     std::vector<const KeyInfo *> shown;
     for (const auto &[name, key] : variables.keys)

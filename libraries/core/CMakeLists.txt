@@ -9,7 +9,9 @@ add_library(notgroot_core
   src/variables.cpp
   src/validate.cpp
   src/layout.cpp
-  src/search.cpp)
+  src/search.cpp
+  src/bt_check.cpp)
 target_include_directories(notgroot_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(notgroot_core PRIVATE PkgConfig::tinyxml2)
+find_package(Threads REQUIRED)
+target_link_libraries(notgroot_core PRIVATE PkgConfig::tinyxml2 Threads::Threads)
 notgroot_project_options(notgroot_core)

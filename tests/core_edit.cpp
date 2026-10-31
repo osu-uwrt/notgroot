@@ -227,8 +227,12 @@ TEST_F(Fixture, NewSubtreeAndMissionSaveAndUndo) {
 }
 
 TEST_F(Fixture, ToyWorkspaceIsValid) {
-    for (const auto &problem : validate(workspace))
+    int typed = 0;
+    for (const auto &problem : validate(workspace)) {
         EXPECT_NE(problem.severity, Severity::Error) << problem.file << ":" << problem.line << ": " << problem.message;
+        typed += problem.message.find("types this key") != std::string::npos;
+    }
+    EXPECT_EQ(typed, 1); // Move x="2"
 }
 
 TEST_F(Fixture, ValidationFindsBtcppErrors) {

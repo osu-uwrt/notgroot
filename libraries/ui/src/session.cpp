@@ -57,12 +57,60 @@ void Session::save() {
     int bad = 0;
     for (const auto &problem : problems())
         bad += problem.severity == Severity::Error;
+    if (!written.empty() && check_ && check_->available() && !workspace.loose())
+        check_->start(workspace);
     if (written.empty())
         status("Nothing to save");
     else
         status("Saved " + std::to_string(written.size()) + (written.size() == 1 ? " file" : " files") +
                    (bad ? " — " + std::to_string(bad) + " problems will stop it loading (F8)" : ""),
                bad > 0);
+}
+
+void Session::setChecker(const std::filesystem::path &program) {
+    check_ = std::make_unique<BtCheck>(program);
+}
+
+bool Session::checking() const {
+    return check_ && check_->running();
+}
+
+void Session::checkNow() {
+    if (!check_ || !check_->available()) {
+        status("notgroot-check is missing: build it with the editor (tools/check)", true);
+        return;
+    }
+    if (workspace.loose()) {
+        status("The BehaviorTree.CPP check needs a trees folder (lib/node_models.xml)", true);
+        return;
+    }
+    if (!check_->start(workspace) && !check_->running())
+        status("Could not start the BehaviorTree.CPP check", true);
+}
+
+void Session::pollCheck() {
+    if (!check_)
+        return;
+    auto result = check_->take();
+    if (!result)
+        return;
+    btProblems = std::move(result->problems);
+    for (auto &problem : btProblems) // on the mission's main tree, so the panel can go there
+        for (const auto &key : workspace.missions())
+            if (workspace.tree(key)->document->path == problem.file)
+                problem.node = {key, {}};
+    problemsVersion_ = ~0u; // merge them into the list
+    if (!result->error.empty()) {
+        btSummary = result->error;
+        status(btSummary, true);
+    } else if (result->failed == 0) {
+        btSummary = std::to_string(result->loaded) + " missions load in BehaviorTree.CPP";
+        status(btSummary);
+    } else {
+        btSummary = std::to_string(result->failed) + " of " + std::to_string(result->loaded + result->failed) +
+                    " missions fail to load in BehaviorTree.CPP";
+        status(btSummary + " (Problems panel)", true);
+    }
 }
 
 void Session::pollDisk() {
@@ -185,6 +233,7 @@ const std::vector<Problem> &Session::problems() {
     if (problemsVersion_ != workspace.version()) {
         problemsVersion_ = workspace.version();
         problems_ = validate(workspace);
+        problems_.insert(problems_.begin(), btProblems.begin(), btProblems.end());
         severity_.clear();
         for (const auto &problem : problems_) {
             if (problem.node.empty())
@@ -324,6 +373,8 @@ void Session::registerCommands() {
          },
          nullptr});
     add({"file.save", "Save", "File", ImGuiMod_Ctrl | ImGuiKey_S, false, [this] { save(); }, open});
+    add({"file.check", "Check with BehaviorTree.CPP", "File", ImGuiKey_F7, false, [this] { checkNow(); },
+         [this] { return workspace.isOpen() && !checking(); }});
     add({"file.quit", "Quit", "File", ImGuiMod_Ctrl | ImGuiKey_Q, false,
          [this] {
              if (quit)

@@ -71,6 +71,7 @@ App::App(Options options) : opt_(std::move(options)) {
     if (!session_.loadBuiltinModels(content_ / "builtin_models.xml", error))
         std::cerr << "notgroot: " << error << '\n';
     session_.quit = [this] { quit(); };
+    session_.setChecker(fs::exists(NOTGROOT_CHECK) ? fs::path(NOTGROOT_CHECK) : fs::path(NOTGROOT_INSTALLED_CHECK));
     session_.browse = [this] {
         const auto start = session_.workspace.isOpen() ? session_.workspace.directory() : fs::path();
         if (!picker_.open("Open a trees folder", start, "", {}, true))
@@ -276,6 +277,7 @@ void App::frame() {
         lastPoll_ = ImGui::GetTime();
         session_.pollDisk();
     }
+    session_.pollCheck();
     session_.problems(); // keeps the cursor valid after undo / reload
 
     menuBar();
@@ -369,7 +371,8 @@ void App::statusBar() {
             warnings += problem.severity == core::Severity::Warning;
         }
         char counts[96];
-        std::snprintf(counts, sizeof(counts), "%d errors  %d warnings  %s", errors, warnings,
+        std::snprintf(counts, sizeof(counts), "%s%d errors  %d warnings  %s",
+                      session_.checking() ? "checking with BehaviorTree.CPP…  " : "", errors, warnings,
                       session_.horizontal ? "left-right" : "top-down");
         const float width = ImGui::CalcTextSize(counts).x + ImGui::GetStyle().ItemSpacing.x * 2;
         ImGui::SameLine(ImGui::GetWindowWidth() - width);

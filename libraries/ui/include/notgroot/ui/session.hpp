@@ -2,6 +2,7 @@
 // selection, cached problems and variables, the commands (menus, shortcuts and the command palette run the same ones)
 // and the requests one panel makes of another (focus the inspector, open the node picker, reveal a node).
 #pragma once
+#include "notgroot/core/bt_check.hpp"
 #include "notgroot/core/edit.hpp"
 #include "notgroot/core/history.hpp"
 #include "notgroot/core/validate.hpp"
@@ -10,6 +11,7 @@
 #include <functional>
 #include <imgui.h>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -101,6 +103,14 @@ class Session {
     void edited(const core::NodeRef &made);
     void edited(bool ok);
 
+    // --- the BehaviorTree.CPP check (notgroot-check), run after each save and on F7 ---
+    void setChecker(const std::filesystem::path &program);
+    void checkNow();
+    void pollCheck(); // call every frame: collects a finished check
+    bool checking() const;
+    std::vector<core::Problem> btProblems; // from the last check
+    std::string btSummary;                 // "33 missions load in BehaviorTree.CPP 4.10" or the failures
+
     // --- cached analysis (recomputed when the workspace changes) ---
     const std::vector<core::Problem> &problems();
     const core::TreeVariables &variables(const std::string &key);
@@ -152,6 +162,7 @@ class Session {
     void registerCommands();
     void validateCursor();
     std::map<std::string, ViewState> views_;
+    std::unique_ptr<core::BtCheck> check_;
     unsigned problemsVersion_ = ~0u;
     std::vector<core::Problem> problems_;
     std::map<core::NodeRef, int> severity_;
