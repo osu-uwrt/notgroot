@@ -150,8 +150,7 @@ void valueField(Session &session, const NodeRef &ref, const std::string &name, c
 std::vector<std::string> keysIn(Session &session, const std::string &tree) {
     std::vector<std::string> keys;
     for (const auto &[name, info] : session.variables(tree).keys)
-        if (!info.constant)
-            keys.push_back(name);
+        keys.push_back(name);
     return keys;
 }
 

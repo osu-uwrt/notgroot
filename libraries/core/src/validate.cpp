@@ -155,7 +155,7 @@ void checkTree(const Workspace &workspace, const TreeEntry &entry, std::vector<P
         if (key.undefined())
             out.push_back({Severity::Warning, "{" + name + "} is read but never set in " + entry.key, document.path,
                            node ? node->line : 0, first.node, first.attribute});
-        else if (key.unused() && !key.constant)
+        else if (key.unused())
             out.push_back({Severity::Note, "{" + name + "} is set but never read in " + entry.key, document.path,
                            node ? node->line : 0, first.node, first.attribute});
     }

@@ -160,15 +160,14 @@ void drawFinder(Session &session) {
             collectNodes(session, key, *entry.tree, {key, {}}, all);
         if (!session.active.empty())
             for (const auto &[name, info] : session.variables(session.active).keys)
-                if (!info.constant)
-                    all.push_back({Target::Key,
-                                   {"{" + name + "}",
-                                    std::to_string(info.reads) + " reads, " + std::to_string(info.writes) + " writes",
-                                    "", keyColor(name), 20},
-                                   session.active,
-                                   name,
-                                   "",
-                                   {}});
+                all.push_back({Target::Key,
+                               {"{" + name + "}",
+                                std::to_string(info.reads) + " reads, " + std::to_string(info.writes) + " writes", "",
+                                keyColor(name), 20},
+                               session.active,
+                               name,
+                               "",
+                               {}});
         for (const auto &command : session.commands)
             if (command.id != "edit.redo2")
                 all.push_back({Target::Command,

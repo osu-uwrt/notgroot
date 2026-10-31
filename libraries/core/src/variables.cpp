@@ -28,27 +28,49 @@ unsigned accessOf(const PortModel *port) {
     return Read;
 }
 
-// Keys a script assigns ("key := value", "key = value"); everything else in a script is not tracked.
-std::vector<std::string> scriptWrites(const std::string &code) {
+// Keys a script names: assigned ("key := value", "key = value", "key += 1") or read (any other name). Quoted
+// text, numbers and true/false are not keys.
+std::vector<std::string> scriptKeys(const std::string &code, unsigned access) {
     std::vector<std::string> keys;
+    char quote = 0;
     for (std::size_t i = 0; i < code.size(); ++i) {
-        if (!(std::isalpha(static_cast<unsigned char>(code[i])) || code[i] == '_'))
+        if (quote) {
+            quote = code[i] == quote ? 0 : quote;
+            continue;
+        }
+        if (code[i] == '\'' || code[i] == '"') {
+            quote = code[i];
+            continue;
+        }
+        if (!(std::isalpha(static_cast<unsigned char>(code[i])) || code[i] == '_' || code[i] == '@'))
             continue;
         if (i > 0 && (std::isalnum(static_cast<unsigned char>(code[i - 1])) || code[i - 1] == '_'))
             continue;
-        std::size_t end = i;
+        std::size_t end = code[i] == '@' ? i + 1 : i;
         while (end < code.size() && (std::isalnum(static_cast<unsigned char>(code[end])) || code[end] == '_'))
             ++end;
         std::size_t at = end;
         while (at < code.size() && code[at] == ' ')
             ++at;
-        const bool assigns = (code.compare(at, 2, ":=") == 0) ||
+        // "k += 1" reads and writes k; "k := 1" only writes it.
+        const bool compound =
+            at + 1 < code.size() && std::string("+-*/").find(code[at]) != std::string::npos && code[at + 1] == '=';
+        const bool assigns = code.compare(at, 2, ":=") == 0 ||
                              (at < code.size() && code[at] == '=' && (at + 1 >= code.size() || code[at + 1] != '='));
-        if (assigns)
-            keys.push_back(code.substr(i, end - i));
+        const auto name = code.substr(i, end - i);
+        // "@key" is the root blackboard's: not this tree's.
+        const bool counted = code[i] != '@' && name != "true" && name != "false";
+        if (counted && (((access & Write) && (assigns || compound)) || ((access & Read) && !assigns)))
+            keys.push_back(name);
         i = end;
     }
     return keys;
+}
+
+// Attributes holding script code.
+bool isScript(const std::string &id, const std::string &name) {
+    return (!name.empty() && name[0] == '_') || ((id == "Script" || id == "ScriptCondition") && name == "code") ||
+           (id == "Precondition" && name == "if");
 }
 } // namespace
 
@@ -61,10 +83,12 @@ std::vector<KeyUse> keyUses(const Workspace &workspace, const Element &node, con
         const auto &name = attribute.name, &value = attribute.value;
         if (name == "ID" || name == "name")
             continue;
-        // Preconditions, post-scripts and Script code: the keys they assign.
-        if ((!name.empty() && name[0] == '_') || (id == "Script" && name == "code")) {
-            if (!scriptWrites(value).empty())
-                uses.push_back({ref, name, Write, false});
+        // Preconditions, post-scripts and Script code: the keys they read and assign.
+        if (isScript(id, name)) {
+            if (!scriptKeys(value, Read).empty())
+                uses.push_back({ref, name, Read, false, true});
+            if (!scriptKeys(value, Write).empty())
+                uses.push_back({ref, name, Write, false, true});
             continue;
         }
         const auto *port = model ? model->port(name) : nullptr;
@@ -94,8 +118,8 @@ std::vector<std::string> keysOf(const Element &node, const KeyUse &use) {
         return keysMentioned(value);
     if (isKeyReference(value))
         return {keyOf(value)};
-    if (!use.attribute.empty() && (use.attribute[0] == '_' || use.attribute == "code"))
-        return scriptWrites(value);
+    if (use.script)
+        return scriptKeys(value, use.access);
     return {value};
 }
 
@@ -112,7 +136,7 @@ void walk(const Workspace &workspace, const Element &element, const NodeRef &ref
             for (const auto &key : keys) {
                 bool seen = false;
                 for (const auto &[k, u] : named)
-                    seen |= k == key && u.attribute == use.attribute;
+                    seen |= k == key && u.attribute == use.attribute && u.access == use.access;
                 if (!seen && !key.empty())
                     named.push_back({key, use});
             }
@@ -148,19 +172,6 @@ TreeVariables analyzeVariables(const Workspace &workspace, const std::string &tr
                 info.port = true;
                 info.portDirection = port.direction;
             }
-
-    // Constants: keys only ever set to their own name (how converted trees pass literals by key).
-    for (auto &[name, info] : result.keys) {
-        bool constant = info.writes > 0;
-        for (const auto &use : info.uses) {
-            if (!(use.access & Write))
-                continue;
-            const auto *node = resolve(workspace, use.node);
-            constant &= node && nodeId(*node) == "SetBlackboardV3" && use.attribute == "output_key" &&
-                        node->get("value") == name;
-        }
-        info.constant = constant;
-    }
     return result;
 }
 } // namespace notgroot::core

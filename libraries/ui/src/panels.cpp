@@ -196,16 +196,11 @@ void drawVariables(Session &session) {
         return;
     }
     static std::string filter;
-    static bool constants = false;
     filterBox("##variables", "Filter keys", filter);
-    ImGui::Checkbox("Show constants", &constants);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Keys set to their own name (SetBlackboardV3 output_key=\"5\" value=\"5\"): how converted "
-                          "trees pass literals");
-    ImGui::SameLine();
     ImGui::TextDisabled("(F2 renames the highlighted key)");
 
-    // Declare: a SetBlackboardV3 (the converted trees' way; else BT.CPP's SetBlackboard) just before the cursor.
+    // Declare: a SetBlackboardV3 just before the cursor (the trees' setter: BT.CPP 4.10's SetBlackboard empties a key
+    // an untyped port declared).
     static std::string declare;
     ImGui::SetNextItemWidth(ui(180));
     const bool enter = inputStringWithHint("##declare", "new key", declare, ImGuiInputTextFlags_EnterReturnsTrue);
@@ -247,7 +242,7 @@ void drawVariables(Session &session) {
     const auto &variables = session.variables(session.active);
     std::vector<const KeyInfo *> shown;
     for (const auto &[name, key] : variables.keys)
-        if ((constants || !key.constant) && fuzzyMatch(filter, name).matched)
+        if (fuzzyMatch(filter, name).matched)
             shown.push_back(&key);
 
     const auto flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp |
@@ -290,10 +285,8 @@ void drawVariables(Session &session) {
             }
             if (key->undefined())
                 ImGui::TextColored(palette().warn, "never set");
-            else if (key->unused() && !key->constant)
+            else if (key->unused())
                 ImGui::TextDisabled("never read");
-            else if (key->constant)
-                ImGui::TextDisabled("constant");
         }
         ImGui::EndTable();
     }

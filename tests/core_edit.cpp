@@ -183,6 +183,20 @@ TEST_F(Fixture, VariablesOfTheMission) {
     EXPECT_FALSE(vars.keys.at("moved").undefined());
 }
 
+TEST_F(Fixture, ScriptsReadAndWriteKeys) {
+    const auto info = refOf(workspace, nodeChildren(*resolve(workspace, sequence()))[1]);
+    ASSERT_TRUE(editor.setAttribute(info, "_skipIf", "depth > 0 && mode != 'depth'"));
+    ASSERT_TRUE(editor.setAttribute(info, "_onSuccess", "count += 1; last := depth; @root := 2"));
+    const auto vars = analyzeVariables(workspace, "Toy.xml");
+    EXPECT_EQ(vars.keys.at("depth").reads, 4); // the message, the call, _skipIf, _onSuccess
+    EXPECT_EQ(vars.keys.at("mode").reads, 1);  // 'depth' is quoted text, not a key
+    EXPECT_EQ(vars.keys.at("count").reads, 1); // += reads and writes
+    EXPECT_EQ(vars.keys.at("count").writes, 1);
+    EXPECT_EQ(vars.keys.at("last").writes, 1);
+    EXPECT_EQ(vars.keys.at("last").reads, 0);
+    EXPECT_EQ(vars.keys.count("root"), 0u); // @root is the root blackboard's
+}
+
 TEST_F(Fixture, VariablesOfASubtreeIncludeItsPorts) {
     const auto vars = analyzeVariables(workspace, "Move");
     EXPECT_TRUE(vars.keys.at("x").port);

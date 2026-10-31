@@ -14,6 +14,7 @@ struct KeyUse {
     std::string attribute;
     unsigned access = Read;
     bool mention = false; // "{key}" inside text (a message, a Format string), not the whole value
+    bool script = false;  // keys named in script code (Script, Precondition if, _skipIf…): reads or writes
 };
 
 struct KeyInfo {
@@ -22,7 +23,6 @@ struct KeyInfo {
     int reads = 0, writes = 0;
     bool port = false; // one of the tree's own ports (subtree model)
     PortDirection portDirection = PortDirection::Input;
-    bool constant = false; // only ever set to its own name (SetBlackboardV3 output_key="5" value="5")
     bool undefined() const;
     bool unused() const;
 };

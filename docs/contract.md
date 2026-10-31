@@ -1,6 +1,6 @@
 # notgroot ↔ riptide_autonomy file contract
 
-Version 3. Both sides follow this document; a change is agreed by both, then the version here goes up and
+Version 4. Both sides follow this document; a change is agreed by both, then the version here goes up and
 riptide_autonomy's README summary is updated to match.
 
 notgroot edits the XML that riptide_autonomy's `doTask` runs with BehaviorTree.CPP 4 (apt
@@ -77,16 +77,21 @@ notgroot's acceptance test round-trips every file of the workspace byte-for-byte
 - A value that starts with `{` and ends with `}` is a blackboard key (`{x}`); anything else is a literal.
 - A `<SubTree ID="X" port="{key}"/>` passes the parent's key; `port="text"` passes the text.
 - Output ports take `{key}`.
-- Converted trees pass v3's empty-key remap (`a=""`) as `{__v3_empty}`, a key that is never set; `{}` is not a key
-  in BehaviorTree.CPP 4.
+- A port that is not used is left out; `{}` is not a key in BehaviorTree.CPP 4.
 - Subtrees run on their own isolated blackboard: no `_autoremap`, no shared blackboard.
-- Text passed to a subtree port is typed by what it looks like: `x="2"` makes the subtree's key `x` an `int`
-  (likewise a double or `true`/`false`). A node inside that reads `x` through a `std::string` port, as every UWRT
-  port does, then fails the whole tree's load (*the port [x] was initially created with type [int]…*). Pass a
-  `{key}` instead; converted trees do this with `SetBlackboardV3` constants. notgroot warns about such values and
-  `notgroot-check` reports the load failure.
-- The v3-behavior nodes `SetBlackboardV3`, `RepeatV3`, `RetryUntilSuccessfulV3` and `BlackboardCheckString` are
-  ordinary custom nodes. Converted trees use them; new trees may use the builtins.
+- Numbers are written as literals, also when passed to a subtree (`<SubTree ID="Move" z="-1.5"/>`), never through a
+  key set to its own value. Text passed to a subtree port is typed by what it looks like: `x="2"` makes the
+  subtree's key `x` an `int` (likewise a double or `true`/`false`). Every UWRT input port is untyped
+  (`BT::AnyTypeAllowed` in `node_models.xml`) so it takes any of them; a typed port that reads `x` with another type
+  fails the tree's load (*the port [x] was initially created with type [int]…*). notgroot warns about such values,
+  naming the port, and `notgroot-check` registers each port with its `node_models.xml` type, so it reports the same
+  failure.
+- Named keys are set with `SetBlackboardV3` (`output_key` is the bare key name, `value` text or `{key}` to copy).
+  BehaviorTree.CPP 4.10's own `SetBlackboard` leaves a key empty when an untyped port declared it, so the trees
+  don't use it.
+- Loops and checks use the builtins: `Repeat`, `RetryUntilSuccessful`, and `Precondition` (or `_skipIf` and the
+  other script attributes) for comparisons. Script code names keys bare (`obj == 'table_spoon_pink'`); notgroot
+  reads the keys a script names (assigned: written, otherwise read) for its variables panel and checks.
 
 ## 6. Editor metadata
 

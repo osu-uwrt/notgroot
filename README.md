@@ -65,8 +65,8 @@ saving writes only the files you changed. Includes are recomputed on save, so yo
   - Select a key to highlight it on the canvas and list its uses.
   - F2 renames it, at the subtree's call sites too when it is a port.
   - Declare inserts a `SetBlackboardV3` for a new key.
-  - Constants (`SetBlackboardV3 output_key="5" value="5"`, how converted trees pass literals) are hidden unless you
-    ask for them.
+  - Keys named in script code (`Precondition if`, `_skipIf` and the other script attributes, `Script`) count as
+    reads, or as writes when assigned.
 - **Trees panel and palette.** Missions and subtrees, and every node model, each with a fuzzy filter. Drag a model
   onto a card, or double-click it, to add it.
 - **Problems.** notgroot checks as you edit, for:
