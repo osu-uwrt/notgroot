@@ -28,8 +28,10 @@ struct Document {
     std::vector<Element *> trees() const;
 };
 
+// A tree in the index. Its key names it uniquely: the ID, except a mission's main tree (missions all call theirs
+// "BehaviorTree"), which goes by its file name, e.g. "CompTree.xml".
 struct TreeEntry {
-    std::string id;
+    std::string key, id;
     Document *document = nullptr;
     Element *tree = nullptr; // the <BehaviorTree>
 };
@@ -68,13 +70,15 @@ class Workspace {
         return catalog_;
     }
 
-    // Trees by ID (a duplicate ID keeps the first and is reported by validation).
+    // Trees by key (a duplicate ID keeps the first and is reported by validation).
     const std::map<std::string, TreeEntry> &trees() const {
         return trees_;
     }
-    const TreeEntry *tree(std::string_view id) const;
-    std::vector<std::string> missionIds() const;   // main trees of missions
-    std::vector<std::string> subtreeIds() const;   // trees in lib/ (or included)
+    const TreeEntry *tree(std::string_view key) const;
+    // The key of a <BehaviorTree> element in a document.
+    std::string treeKey(const Document &, const Element &tree) const;
+    std::vector<std::string> missions() const;     // keys of missions' main trees
+    std::vector<std::string> subtrees() const;     // keys (IDs) of every other tree
     std::vector<std::string> duplicateIds() const; // IDs defined more than once
     // A mission document's main tree ID.
     static std::string mainTreeId(const Document &);

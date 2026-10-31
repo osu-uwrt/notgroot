@@ -1,0 +1,292 @@
+// Edits, variables, validation, layout and search over the toy workspace (and the real trees when present).
+#include "notgroot/core/edit.hpp"
+#include "notgroot/core/layout.hpp"
+#include "notgroot/core/search.hpp"
+#include "notgroot/core/validate.hpp"
+#include "notgroot/core/variables.hpp"
+#include "test_support.hpp"
+#include <gtest/gtest.h>
+
+using namespace notgroot::core;
+using notgroot::test::openWorkspace;
+using notgroot::test::ScratchCopy;
+
+namespace {
+struct Fixture : ::testing::Test {
+    Workspace workspace;
+    History history{workspace};
+    Editor editor{workspace, history};
+    void SetUp() override {
+        openWorkspace(workspace, notgroot::test::data("toy"));
+    }
+    // The toy mission's Sequence.
+    NodeRef sequence() const {
+        return refOf(workspace, workspace.tree("Toy.xml")->tree->elements().front());
+    }
+    std::vector<std::string> ids(const NodeRef &parent) const {
+        std::vector<std::string> list;
+        for (auto *child : nodeChildren(*resolve(workspace, parent)))
+            list.push_back(isSubTree(*child) ? "SubTree:" + child->get("ID") : nodeId(*child));
+        return list;
+    }
+    std::string text(const std::string &key) const {
+        return writeXml(*workspace.tree(key)->document->root);
+    }
+};
+} // namespace
+
+TEST_F(Fixture, RefsResolveAndSurviveUndo) {
+    const auto seq = sequence();
+    EXPECT_EQ(seq.tree, "Toy.xml");
+    EXPECT_EQ(nodeId(*resolve(workspace, seq)), "Sequence");
+    const auto info = seq.child(2); // after the comment and SetBlackboardV3
+    EXPECT_EQ(nodeId(*resolve(workspace, info)), "Info");
+    EXPECT_EQ(refOf(workspace, resolve(workspace, info)), info);
+}
+
+TEST_F(Fixture, InsertMoveDeleteUndo) {
+    const auto before = text("Toy.xml");
+    const auto wait = *workspace.catalog().find("Wait");
+    const auto made = editor.insert(sequence(), 1, makeNode(wait), "Add Wait");
+    ASSERT_FALSE(made.empty()) << editor.error();
+    EXPECT_EQ(ids(sequence())[1], "Wait");
+    EXPECT_EQ(resolve(workspace, made)->get("seconds"), "");
+
+    // Moving the SetBlackboardV3 down carries the comment above it.
+    const auto set = refOf(workspace, nodeChildren(*resolve(workspace, sequence()))[0]);
+    const auto moved = editor.move(set, 1);
+    EXPECT_EQ(ids(sequence())[0], "Wait");
+    EXPECT_EQ(ids(sequence())[1], "SetBlackboardV3");
+    const auto *element = resolve(workspace, moved);
+    EXPECT_TRUE(element->parent->children[element->index() - 1]->isComment());
+
+    EXPECT_TRUE(editor.remove({moved}));
+    EXPECT_EQ(ids(sequence())[1], "Info");
+    while (history.undo()) {
+    }
+    EXPECT_EQ(text("Toy.xml"), before);
+}
+
+TEST_F(Fixture, RefusesWhatBtcppWouldReject) {
+    const auto *wait = workspace.catalog().find("Wait");
+    // A tree has one root; a leaf has no children; a decorator one.
+    EXPECT_TRUE(editor.insert({"Toy.xml", {}}, 1, makeNode(*wait), "x").empty());
+    const auto info = sequence().child(2);
+    EXPECT_TRUE(editor.insert(info, 0, makeNode(*wait), "x").empty());
+    const auto retry = refOf(workspace, workspace.tree("Settle")->tree->elements().front());
+    EXPECT_TRUE(editor.insert(retry, 1, makeNode(*wait), "x").empty());
+    EXPECT_FALSE(history.canUndo());
+}
+
+TEST_F(Fixture, WrapUnwrapIndentOutdent) {
+    // Copies: an edit rebuilds the catalog.
+    const auto inverter = *workspace.catalog().find("Inverter");
+    const auto fallback = *workspace.catalog().find("Fallback");
+    const auto info = sequence().child(2);
+    const auto wrapped = editor.wrap({info}, inverter);
+    ASSERT_FALSE(wrapped.empty()) << editor.error();
+    EXPECT_EQ(nodeId(*resolve(workspace, wrapped)), "Inverter");
+    EXPECT_EQ(nodeId(*nodeChildren(*resolve(workspace, wrapped))[0]), "Info");
+    // An Inverter takes one child.
+    EXPECT_TRUE(editor.wrap({sequence().child(2), sequence().child(3)}, inverter).empty());
+    const auto unwrapped = editor.unwrap(wrapped);
+    EXPECT_EQ(nodeId(*resolve(workspace, unwrapped)), "Info");
+
+    const auto group = editor.wrap({sequence().child(2), sequence().child(3)}, fallback);
+    ASSERT_FALSE(group.empty());
+    EXPECT_EQ(nodeChildren(*resolve(workspace, group)).size(), 2u);
+    // Out of the group and back in.
+    const auto inner = refOf(workspace, nodeChildren(*resolve(workspace, group))[1]);
+    const auto out = editor.outdent(inner);
+    ASSERT_FALSE(out.empty()) << editor.error();
+    EXPECT_EQ(nodeChildren(*resolve(workspace, group)).size(), 1u);
+    const auto back = editor.indent(out);
+    ASSERT_FALSE(back.empty()) << editor.error();
+    EXPECT_EQ(nodeChildren(*resolve(workspace, group)).size(), 2u);
+}
+
+TEST_F(Fixture, RetypeKeepsChildrenAndSharedPorts) {
+    const auto reactive = *workspace.catalog().find("ReactiveSequence");
+    const auto made = editor.retype(sequence(), reactive);
+    ASSERT_FALSE(made.empty()) << editor.error();
+    EXPECT_EQ(resolve(workspace, made)->tag, "ReactiveSequence");
+    EXPECT_EQ(resolve(workspace, made)->get("name"), "TOY");
+    EXPECT_EQ(nodeChildren(*resolve(workspace, made)).size(), 5u);
+    // A leaf cannot take the Sequence's children.
+    const auto wait = *workspace.catalog().find("Wait");
+    EXPECT_TRUE(editor.retype(made, wait).empty());
+}
+
+TEST_F(Fixture, ClipboardRoundTrip) {
+    const auto clip = copyNodes(workspace, {sequence().child(3), sequence().child(4)});
+    auto nodes = parseClipboard(clip);
+    ASSERT_EQ(nodes.size(), 2u);
+    EXPECT_EQ(nodes[0]->get("ID"), "Move");
+    EXPECT_EQ(nodes[1]->tag, "Fallback");
+    const auto pasted = editor.insertMany(sequence(), 0, std::move(nodes), "Paste");
+    ASSERT_FALSE(pasted.empty());
+    EXPECT_EQ(ids(sequence())[0], "SubTree:Move");
+    // A whole file pastes as its tree's nodes.
+    EXPECT_EQ(parseClipboard(text("Settle")).size(), 1u);
+    EXPECT_TRUE(parseClipboard("not xml <").empty());
+}
+
+TEST_F(Fixture, VariablesOfTheMission) {
+    const auto vars = analyzeVariables(workspace, "Toy.xml");
+    ASSERT_TRUE(vars.keys.count("depth"));
+    const auto &depth = vars.keys.at("depth");
+    EXPECT_EQ(depth.writes, 1); // SetBlackboardV3 output_key, a bare key name
+    EXPECT_EQ(depth.reads, 2);  // the Info message mention and Move's x
+    ASSERT_TRUE(vars.keys.count("moved"));
+    EXPECT_EQ(vars.keys.at("moved").writes, 2); // Move's done is an output port
+    EXPECT_EQ(vars.keys.at("moved").reads, 1);
+    EXPECT_FALSE(vars.keys.at("moved").undefined());
+}
+
+TEST_F(Fixture, VariablesOfASubtreeIncludeItsPorts) {
+    const auto vars = analyzeVariables(workspace, "Move");
+    EXPECT_TRUE(vars.keys.at("x").port);
+    EXPECT_FALSE(vars.keys.at("x").undefined()); // handed in by the port
+    EXPECT_TRUE(vars.keys.at("done").port);
+    EXPECT_FALSE(vars.keys.at("done").unused()); // handed out by the port
+    EXPECT_TRUE(vars.keys.at("dx").unused());
+    EXPECT_TRUE(vars.keys.at("oy").unused());
+}
+
+TEST_F(Fixture, RenameKeyAndPortFollowsCallSites) {
+    EXPECT_GT(editor.renameKey("Toy.xml", "depth", "target_depth"), 0);
+    const auto mission = text("Toy.xml");
+    EXPECT_NE(mission.find("output_key=\"target_depth\""), std::string::npos);
+    EXPECT_NE(mission.find("Diving to &quot;{target_depth}&quot;"), std::string::npos);
+    EXPECT_NE(mission.find("x=\"{target_depth}\""), std::string::npos);
+
+    // Renaming Move's port x renames it in Move, in the model, and at both call sites, in one step.
+    EXPECT_GT(editor.renameKey("Move", "x", "goal_x"), 0);
+    EXPECT_NE(text("Move").find("a=\"{goal_x}\""), std::string::npos);
+    EXPECT_NE(text("Toy.xml").find("goal_x=\"{target_depth}\""), std::string::npos);
+    EXPECT_NE(text("Toy.xml").find("goal_x=\"2\""), std::string::npos);
+    EXPECT_TRUE(workspace.catalog().find("Move")->port("goal_x"));
+    EXPECT_TRUE(history.undo());
+    EXPECT_TRUE(workspace.catalog().find("Move")->port("x"));
+    EXPECT_NE(text("Toy.xml").find("x=\"2\""), std::string::npos);
+}
+
+TEST_F(Fixture, RenameSubtreeMovesItsFile) {
+    ASSERT_TRUE(editor.renameTree("Settle", "Steady")) << editor.error();
+    ASSERT_TRUE(workspace.tree("Steady"));
+    EXPECT_EQ(workspace.tree("Steady")->document->path.filename(), "Steady.xml");
+    EXPECT_FALSE(workspace.tree("Settle"));
+    EXPECT_NE(text("Toy.xml").find("<SubTree ID=\"Steady\"/>"), std::string::npos);
+    EXPECT_NE(text("Move").find("<SubTree ID=\"Steady\"/>"), std::string::npos);
+    EXPECT_TRUE(history.undo());
+    EXPECT_TRUE(workspace.tree("Settle"));
+    EXPECT_FALSE(workspace.tree("Steady"));
+}
+
+TEST_F(Fixture, DeleteTreeRefusesWhileCalled) {
+    EXPECT_FALSE(editor.deleteTree("Settle"));
+    EXPECT_NE(editor.error().find("called"), std::string::npos);
+}
+
+TEST_F(Fixture, ExtractSubtreeMakesPorts) {
+    // Move's GetOdometry + Math: ox is set and read inside (no port), x is read (input), dx set and unused (none).
+    const auto move = refOf(workspace, workspace.tree("Move")->tree->elements().front());
+    const auto made = editor.extractSubtree({move.child(0), move.child(1)}, "Offset");
+    ASSERT_FALSE(made.empty()) << editor.error();
+    const auto *call = resolve(workspace, made);
+    EXPECT_EQ(call->get("ID"), "Offset");
+    EXPECT_EQ(call->get("x"), "{x}");
+    EXPECT_FALSE(call->has("ox"));
+    ASSERT_TRUE(workspace.tree("Offset"));
+    EXPECT_EQ(nodeId(*workspace.tree("Offset")->tree->elements().front()), "Sequence");
+    const auto *model = workspace.catalog().find("Offset");
+    ASSERT_TRUE(model && model->port("x"));
+    EXPECT_EQ(model->port("x")->direction, PortDirection::Input);
+    EXPECT_TRUE(history.undo());
+    EXPECT_FALSE(workspace.tree("Offset"));
+    EXPECT_FALSE(workspace.catalog().find("Offset"));
+}
+
+TEST_F(Fixture, NewSubtreeAndMissionSaveAndUndo) {
+    ScratchCopy copy("toy");
+    Workspace scratch;
+    openWorkspace(scratch, copy.path());
+    History h(scratch);
+    Editor e(scratch, h);
+    ASSERT_FALSE(e.createSubtree("Hover").empty());
+    EXPECT_TRUE(e.createSubtree("Hover").empty()); // exists
+    EXPECT_TRUE(e.createSubtree("2bad").empty());
+    ASSERT_FALSE(e.createMission("Demo").empty());
+    EXPECT_EQ(scratch.missions().size(), 2u);
+    EXPECT_TRUE(h.undo());
+    EXPECT_EQ(scratch.missions().size(), 1u);
+    std::vector<std::string> errors;
+    scratch.save(errors);
+    EXPECT_TRUE(std::filesystem::exists(copy.path() / "lib" / "Hover.xml"));
+    EXPECT_FALSE(std::filesystem::exists(copy.path() / "Demo.xml"));
+}
+
+TEST_F(Fixture, ToyWorkspaceIsValid) {
+    for (const auto &problem : validate(workspace))
+        EXPECT_NE(problem.severity, Severity::Error) << problem.file << ":" << problem.line << ": " << problem.message;
+}
+
+TEST_F(Fixture, ValidationFindsBtcppErrors) {
+    auto *info = resolve(workspace, sequence().child(2));
+    info->set("colour", "red");                   // not a port
+    info->append(std::make_unique<Element>("X")); // a leaf with a child, and an unknown node
+    workspace.reindex();
+    int errors = 0;
+    for (const auto &problem : validateTree(workspace, "Toy.xml"))
+        errors += problem.severity == Severity::Error;
+    EXPECT_EQ(errors, 3);
+}
+
+TEST(Validate, RealTreesHaveNoErrors) {
+    const auto trees = notgroot::test::realTrees();
+    if (trees.empty())
+        GTEST_SKIP() << "no trees directory (set NOTGROOT_TREES_DIR)";
+    Workspace workspace;
+    openWorkspace(workspace, trees);
+    int warnings = 0;
+    for (const auto &problem : validate(workspace)) {
+        EXPECT_NE(problem.severity, Severity::Error) << problem.file << ":" << problem.line << ": " << problem.message;
+        warnings += problem.severity == Severity::Warning;
+    }
+    std::cout << warnings << " warnings in the real trees\n";
+}
+
+TEST(Layout, ChildrenDoNotOverlapAndParentsCentre) {
+    // root with three children; the middle one has two wide children.
+    std::vector<LayoutBox> boxes{{100, 40, {1, 2, 3}}, {80, 40, {}},  {60, 40, {4, 5}},
+                                 {80, 40, {}},         {200, 40, {}}, {200, 40, {}}};
+    const auto rects = layoutTree(boxes, 0);
+    for (std::size_t a = 1; a < rects.size(); ++a)
+        for (std::size_t b = a + 1; b < rects.size(); ++b) {
+            const bool apart = rects[a].x + rects[a].width <= rects[b].x || rects[b].x + rects[b].width <= rects[a].x ||
+                               rects[a].y + rects[a].height <= rects[b].y || rects[b].y + rects[b].height <= rects[a].y;
+            EXPECT_TRUE(apart) << a << " overlaps " << b;
+        }
+    EXPECT_LT(rects[1].x, rects[2].x);
+    EXPECT_LT(rects[2].x, rects[3].x);
+    EXPECT_GT(rects[4].y, rects[2].y);
+    const float parent = rects[2].x + rects[2].width / 2;
+    const float kids = (rects[4].x + rects[4].width / 2 + rects[5].x + rects[5].width / 2) / 2;
+    EXPECT_NEAR(parent, kids, 0.01);
+    // Left-right: children stack downward, one column right.
+    const auto sideways = layoutTree(boxes, 0, {true});
+    EXPECT_GT(sideways[1].x, sideways[0].x);
+    EXPECT_LT(sideways[1].y, sideways[3].y);
+}
+
+TEST(Search, FuzzyPrefersWordStartsAndRuns) {
+    EXPECT_TRUE(fuzzyMatch("pmp", "PrimitiveMovePosition").matched);
+    EXPECT_FALSE(fuzzyMatch("xyz", "PrimitiveMovePosition").matched);
+    EXPECT_GT(fuzzyMatch("move", "PrimitiveMovePosition").score, fuzzyMatch("move", "RemoveOverlap").score);
+    EXPECT_GT(fuzzyMatch("dive", "Dive").score, fuzzyMatch("dive", "DownwardSearchSlowly").score);
+    const auto match = fuzzyMatch("gt", "GateTree");
+    ASSERT_TRUE(match.matched);
+    EXPECT_EQ(match.positions, (std::vector<int>{0, 4}));
+    EXPECT_TRUE(fuzzyMatch("", "anything").matched);
+    EXPECT_FALSE(fuzzyMatch("D", "dive").matched); // an uppercase query letter must match case
+}

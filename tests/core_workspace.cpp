@@ -13,8 +13,8 @@ TEST(Workspace, OpensTheContractLayout) {
     Workspace workspace;
     openWorkspace(workspace, notgroot::test::data("toy"));
     EXPECT_FALSE(workspace.loose());
-    EXPECT_EQ(workspace.missionIds(), std::vector<std::string>{"BehaviorTree"});
-    EXPECT_EQ(workspace.subtreeIds(), (std::vector<std::string>{"Move", "Settle"}));
+    EXPECT_EQ(workspace.missions(), std::vector<std::string>{"Toy.xml"});
+    EXPECT_EQ(workspace.subtrees(), (std::vector<std::string>{"Move", "Settle"}));
     ASSERT_TRUE(workspace.models());
     for (const auto &document : workspace.documents())
         EXPECT_FALSE(document->dirty()) << document->path;
@@ -39,7 +39,7 @@ TEST(Workspace, OpeningAFileOpensItsWorkspace) {
     openWorkspace(workspace, notgroot::test::data("toy") / "lib" / "Move.xml");
     EXPECT_FALSE(workspace.loose());
     EXPECT_EQ(workspace.focus().filename(), "Move.xml");
-    EXPECT_EQ(workspace.missionIds().size(), 1u);
+    EXPECT_EQ(workspace.missions().size(), 1u);
 }
 
 TEST(Workspace, LooseFileFollowsIncludes) {
@@ -102,9 +102,9 @@ TEST(Workspace, NewSubtreeIsIncludedAndModelled) {
         auto *document = workspace.createSubtreeDocument("Hover");
         change.touch(*document);
         workspace.tree("Settle"); // untouched
-        auto *mission = workspace.tree("BehaviorTree")->document;
+        auto *mission = workspace.tree("Toy.xml")->document;
         change.touch(*mission);
-        auto *sequence = workspace.tree("BehaviorTree")->tree->elements().front();
+        auto *sequence = workspace.tree("Toy.xml")->tree->elements().front();
         auto call = std::make_unique<Element>("SubTree");
         call->set("ID", "Hover");
         sequence->append(std::move(call));
@@ -165,7 +165,7 @@ TEST(Workspace, RealTreesOpenCleanly) {
         GTEST_SKIP() << "no trees directory (set NOTGROOT_TREES_DIR)";
     Workspace workspace;
     openWorkspace(workspace, trees);
-    EXPECT_GT(workspace.missionIds().size(), 5u);
+    EXPECT_GT(workspace.missions().size(), 5u);
     EXPECT_TRUE(workspace.duplicateIds().empty());
     for (const auto &document : workspace.documents()) {
         EXPECT_TRUE(document->root) << document->path << ": " << document->error.message;

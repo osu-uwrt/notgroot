@@ -200,24 +200,26 @@ std::string Workspace::mainTreeId(const Document &document) {
     return trees.size() == 1 ? trees.front()->get("ID") : std::string();
 }
 
-std::vector<std::string> Workspace::missionIds() const {
-    std::vector<std::string> ids;
-    for (const auto &document : documents_)
-        if (!document->deleted && document->role == DocumentRole::Mission)
-            if (auto id = mainTreeId(*document); !id.empty())
-                ids.push_back(id);
-    return ids;
+std::string Workspace::treeKey(const Document &document, const Element &tree) const {
+    if (document.role == DocumentRole::Mission && tree.get("ID") == mainTreeId(document))
+        return document.path.filename().string();
+    return tree.get("ID");
 }
 
-std::vector<std::string> Workspace::subtreeIds() const {
-    std::set<std::string> missions;
-    for (const auto &id : missionIds())
-        missions.insert(id);
-    std::vector<std::string> ids;
-    for (const auto &[id, entry] : trees_)
-        if (!missions.count(id) || entry.document->role != DocumentRole::Mission)
-            ids.push_back(id);
-    return ids;
+std::vector<std::string> Workspace::missions() const {
+    std::vector<std::string> keys;
+    for (const auto &[key, entry] : trees_)
+        if (entry.document->role == DocumentRole::Mission && entry.id == mainTreeId(*entry.document))
+            keys.push_back(key);
+    return keys;
+}
+
+std::vector<std::string> Workspace::subtrees() const {
+    std::vector<std::string> keys;
+    for (const auto &[key, entry] : trees_)
+        if (!(entry.document->role == DocumentRole::Mission && entry.id == mainTreeId(*entry.document)))
+            keys.push_back(key);
+    return keys;
 }
 
 std::vector<std::string> Workspace::duplicateIds() const {
@@ -231,13 +233,9 @@ void Workspace::reindex() {
         if (document->deleted)
             continue;
         for (auto *tree : document->trees()) {
-            const auto id = tree->get("ID");
-            // Several missions all call their main tree "BehaviorTree": those stay out of the shared index.
-            if (document->role == DocumentRole::Mission && id == mainTreeId(*document) && trees_.count(id) &&
-                trees_[id].document->role == DocumentRole::Mission)
-                continue;
-            if (!trees_.emplace(id, TreeEntry{id, document.get(), tree}).second)
-                duplicates_.push_back(id);
+            const auto key = treeKey(*document, *tree);
+            if (!trees_.emplace(key, TreeEntry{key, tree->get("ID"), document.get(), tree}).second)
+                duplicates_.push_back(key);
         }
     }
 
@@ -247,7 +245,7 @@ void Workspace::reindex() {
     if (models_ && !models_->deleted && models_->root)
         catalog_.addTreeNodesModel(*models_->root, false);
     for (const auto &[id, entry] : trees_)
-        if (!catalog_.find(id) && entry.document->role != DocumentRole::Mission) {
+        if (id == entry.id && !catalog_.find(id)) {
             NodeModel model;
             model.id = id;
             model.category = Category::SubTree;
@@ -377,8 +375,6 @@ std::vector<std::string> Workspace::requiredIncludes(const Document &document) c
         if (own.count(id))
             continue;
         const auto *entry = tree(id);
-        if (entry && entry->document->role == DocumentRole::Mission)
-            continue; // a mission's main tree is never included
         const auto target = entry ? entry->document->path : subtreePath(id);
         paths.push_back(fs::path(target).lexically_relative(document.path.parent_path()).generic_string());
     }

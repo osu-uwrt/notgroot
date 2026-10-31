@@ -31,6 +31,7 @@ struct NodeModel {
 };
 
 // Every model the editor knows: BehaviorTree.CPP's builtins and node_models.xml (custom nodes and subtree ports).
+// The workspace rebuilds it after every edit: pointers from find() and all() last until the next change.
 class Catalog {
   public:
     void clear();
