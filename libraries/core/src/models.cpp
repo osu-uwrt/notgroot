@@ -78,11 +78,11 @@ NodeModel readModel(const Element &entry, bool builtin) {
         port.description = child->text;
         model.ports.push_back(std::move(port));
     }
-    // The v3-behavior SetBlackboard names its key bare (output_key="x"), as v3 did.
-    if (model.id == "SetBlackboardV3")
-        for (auto &port : model.ports)
-            if (port.name == "output_key")
-                port.keyName = true;
+    // Ports that name a key bare (output_key="x"): BehaviorTree.CPP reads them with getInput, so "{x}" would mean
+    // "the key whose name x holds".
+    for (auto &port : model.ports)
+        port.keyName |= ((model.id == "SetBlackboard" || model.id == "SetBlackboardV3") && port.name == "output_key") ||
+                        (model.id == "UnsetBlackboard" && port.name == "key");
     return model;
 }
 

@@ -68,17 +68,16 @@ std::vector<KeyUse> keyUses(const Workspace &workspace, const Element &node, con
             continue;
         }
         const auto *port = model ? model->port(name) : nullptr;
-        if (isKeyReference(value)) {
-            unsigned access = accessOf(port);
-            // SetBlackboard's output_key is where it writes, whatever the port says.
-            if (name == "output_key" && (id == "SetBlackboard" || id == "SetBlackboardV3"))
-                access = Write;
-            uses.push_back({ref, name, access, false});
+        if (port && port->keyName) {
+            // A bare name is the key written (or removed); {k} reads k for that name.
+            if (isKeyReference(value))
+                uses.push_back({ref, name, Read, false});
+            else if (!value.empty())
+                uses.push_back({ref, name, Write, false});
             continue;
         }
-        if (port && port->keyName) {
-            if (!value.empty())
-                uses.push_back({ref, name, Write, false});
+        if (isKeyReference(value)) {
+            uses.push_back({ref, name, accessOf(port), false});
             continue;
         }
         if (!keysMentioned(value).empty())
