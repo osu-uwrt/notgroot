@@ -572,6 +572,7 @@ void App::aboutWindow() {
         return;
     ImGui::SetNextWindowSize(ui::ui(ImVec2(420, 0)), ImGuiCond_Appearing);
     if (ImGui::Begin("About notgroot", &showAbout_, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse)) {
+        ui::dismissible(showAbout_);
         if (const unsigned texture = logoTexture()) {
             const float height = ui::ui(72), width = height * float(logoWidth_) / float(logoHeight_);
             ImGui::ImageWithBg(ImTextureID(texture), {width, height}, {0, 0}, {1, 1}, {0, 0, 0, 0}, ui::palette().text);

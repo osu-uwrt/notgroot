@@ -40,6 +40,17 @@ bool darkTheme() {
     return luminance(ImGui::GetStyle().Colors[ImGuiCol_WindowBg]) < .4f;
 }
 
+void dismissible(bool &open) {
+    if (ImGui::IsWindowAppearing())
+        return; // the click or key that opened it
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+        open = false;
+    const bool clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+    if (clicked && !ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows |
+                                           ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
+        open = false;
+}
+
 ImVec4 withAlpha(ImVec4 c, float a) {
     return {c.x, c.y, c.z, a};
 }

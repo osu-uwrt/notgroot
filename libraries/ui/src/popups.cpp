@@ -685,6 +685,7 @@ void drawShortcuts(Session &session) {
         ImGui::End();
         return;
     }
+    dismissible(session.showShortcuts);
     static std::string filter;
     if (ImGui::IsWindowAppearing())
         ImGui::SetKeyboardFocusHere();

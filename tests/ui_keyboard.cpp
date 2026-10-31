@@ -50,6 +50,7 @@ class Harness : public ::testing::Test {
         ui::drawFinder(session);
         ui::drawPicker(session);
         ui::drawDialogs(session);
+        ui::drawShortcuts(session);
         ui::handleShortcuts(session);
         ImGui::Render();
         session.problems();
@@ -304,4 +305,24 @@ TEST_F(Harness, FloatingNodesBlockSaving) {
     press(ImGuiKey_S, ImGuiMod_Ctrl);
     EXPECT_EQ(session.dialog.kind, ui::Session::Dialog::None);
     EXPECT_FALSE(session.dirty());
+}
+
+// The keyboard guide closes with Esc, or a click outside it.
+TEST_F(Harness, ShortcutsCloseWithEscOrClickOutside) {
+    press(ImGuiKey_F1);
+    EXPECT_TRUE(session.showShortcuts);
+    frames(2);
+    press(ImGuiKey_Escape);
+    EXPECT_FALSE(session.showShortcuts);
+
+    press(ImGuiKey_F1);
+    frames(2);
+    auto &io = ImGui::GetIO();
+    io.AddMousePosEvent(5, 995); // a corner of the canvas, away from the centred guide
+    frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    frames(2);
+    EXPECT_FALSE(session.showShortcuts);
 }

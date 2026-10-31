@@ -38,6 +38,8 @@ const char *directionBadge(core::PortDirection); // IN, OUT, IO
 // Problem severity colors from the theme (error, warn, muted).
 ImVec4 severityColor(int severity);
 ImVec4 withAlpha(ImVec4, float);
+// Inside a floating window (shortcuts, about): Esc, or a click outside it, closes it.
+void dismissible(bool &open);
 
 // The canvas zooms in steps, and its card fonts are baked at every step so text is drawn at the size it was
 // rasterized at (scaling a bitmap font blurs it).
