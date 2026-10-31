@@ -159,7 +159,9 @@ void treeInspector(Session &session, const std::string &key) {
     const auto *entry = session.workspace.tree(key);
     if (!entry)
         return;
-    const bool subtree = key == entry->id;
+    // Its ID, kept: an edit below (its color) reindexes the workspace, and `entry` goes with it.
+    const std::string id = entry->id;
+    const bool subtree = key == id;
     ImGui::PushFont(typeRamp().number);
     ImGui::TextColored(subtree ? categoryColor(Category::SubTree) : rootColor(), "%s", key.c_str());
     ImGui::PopFont();
@@ -176,7 +178,7 @@ void treeInspector(Session &session, const std::string &key) {
 
     if (subtree) {
         // Its color on every call (btstudio's custom subtree colors), kept as a notgroot:color comment.
-        const auto hex = treeColor(session.workspace, entry->id);
+        const auto hex = treeColor(session.workspace, id);
         ImVec4 color = subtreeColor(hex);
         float rgb[3] = {color.x, color.y, color.z};
         ImGui::ColorEdit3("Color", rgb, ImGuiColorEditFlags_NoInputs);
@@ -184,15 +186,15 @@ void treeInspector(Session &session, const std::string &key) {
             char text[8];
             std::snprintf(text, sizeof(text), "#%02x%02x%02x", int(rgb[0] * 255 + .5f), int(rgb[1] * 255 + .5f),
                           int(rgb[2] * 255 + .5f));
-            session.edited(session.editor.setTreeColor(entry->id, text));
+            session.edited(session.editor.setTreeColor(id, text));
         }
         if (!hex.empty()) {
             ImGui::SameLine();
             if (ImGui::SmallButton("Default color"))
-                session.edited(session.editor.setTreeColor(entry->id, ""));
+                session.edited(session.editor.setTreeColor(id, ""));
         }
         sectionTitle("Ports");
-        const auto model = session.workspace.subtreeModel(entry->id);
+        const auto model = session.workspace.subtreeModel(id);
         if (model.ports.empty())
             emptyState("No ports: callers pass nothing in or out. Edit ports… to add some.");
         for (const auto &port : model.ports) {
@@ -205,7 +207,7 @@ void treeInspector(Session &session, const std::string &key) {
             }
         }
         sectionTitle("Called from");
-        const auto sites = session.editor.callSites(entry->id);
+        const auto sites = session.editor.callSites(id);
         if (sites.empty())
             emptyState("Nothing calls this subtree.");
         for (std::size_t i = 0; i < sites.size(); ++i)

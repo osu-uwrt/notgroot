@@ -257,7 +257,9 @@ void drawVariables(Session &session) {
         return;
     static std::string filter;
     filterBox("##variables", "Filter keys", filter);
-    const auto &variables = session.variables(session.active);
+    // A copy: an edit made from this panel (a global added, a value set) recomputes the session's, while this frame
+    // still draws the rows it found.
+    const auto variables = session.variables(session.active);
     std::vector<const KeyInfo *> inputs, globals, locals;
     for (const auto &[name, key] : variables.keys)
         if (fuzzyMatch(filter, name).matched)

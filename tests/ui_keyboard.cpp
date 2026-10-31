@@ -6,6 +6,7 @@
 #include "test_support.hpp"
 #include <fstream>
 #include <gtest/gtest.h>
+#include <imgui_internal.h>
 
 using namespace notgroot;
 using notgroot::test::ScratchCopy;
@@ -44,10 +45,17 @@ class Harness : public ::testing::Test {
             ui::drawCanvas(session);
         ImGui::End();
         ImGui::SetNextWindowPos({1100, 0});
-        ImGui::SetNextWindowSize({500, 1000});
+        ImGui::SetNextWindowSize({500, variablesPanel ? 450.f : 1000.f});
         if (ImGui::Begin("Inspector"))
             ui::drawInspector(session);
         ImGui::End();
+        if (variablesPanel) {
+            ImGui::SetNextWindowPos({1100, 450});
+            ImGui::SetNextWindowSize({500, 550});
+            if (ImGui::Begin("Variables"))
+                ui::drawVariables(session);
+            ImGui::End();
+        }
         ui::drawFinder(session);
         ui::drawPicker(session);
         ui::drawDialogs(session);
@@ -84,6 +92,32 @@ class Harness : public ::testing::Test {
     core::Element *at(const core::NodeRef &ref) {
         return core::resolve(session.workspace, ref);
     }
+    bool variablesPanel = false;
+
+    // Moves the mouse down a column of the window that holds `label` until that item is under it; false if none is.
+    bool hover(const char *window, const char *label, float x) {
+        ImGuiWindow *found = nullptr;
+        for (auto *w : GImGui->Windows)
+            if (std::string(w->Name).find(window) != std::string::npos)
+                found = w;
+        if (!found)
+            return false;
+        const ImGuiID id = ImHashStr(label, 0, found->ID);
+        for (float y = found->Pos.y; y < found->Pos.y + found->Size.y; y += 3) {
+            ImGui::GetIO().AddMousePosEvent(found->Pos.x + x, y);
+            frame();
+            if (GImGui->HoveredId == id)
+                return true;
+        }
+        return false;
+    }
+    void click() {
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        frame();
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        frames(2);
+    }
+
     std::string cursorId() {
         auto *element = at(session.cursor.ref);
         return element ? (session.cursor.ref.isTree() ? "<tree>" : core::nodeId(*element)) : "<none>";
@@ -372,4 +406,21 @@ TEST_F(Harness, KeyColorsStayApartInEveryTheme) {
     const auto a = ui::keyColors(keys(30)), b = ui::keyColors(reversed);
     for (const auto &[key, color] : a)
         EXPECT_EQ(ui::colorDistance(color, b.at(key)), 0.f) << key;
+}
+
+// Adding a global from the Variables panel with the mouse: the panel goes on drawing after the edit (a regression:
+// it kept pointers into keys the edit had replaced).
+TEST_F(Harness, AddGlobalFromThePanel) {
+    variablesPanel = true;
+    session.openTree("Move");
+    frames(3);
+    ASSERT_TRUE(hover("##sections", "##newname", 40));
+    click();
+    type("speed");
+    ASSERT_TRUE(hover("##sections", "+", 470));
+    click();
+    frames(3);
+    EXPECT_EQ(core::readGlobals(*session.workspace.tree("Move")->tree).globals,
+              (std::vector<core::Global>{{"speed", ""}}));
+    EXPECT_EQ(session.variables("Move").keys.at("speed").scope, core::Scope::Global);
 }
