@@ -18,8 +18,10 @@ struct Choice {
     int bonus = 0;            // ranks ahead of plain matches
 };
 
+// `prefixed`: a leading > @ $ or # in the query picks the kind and is not matched. The field keeps the whole text
+// (an active ImGui input owns its buffer, so the caller can't strip it).
 int chooser(const char *id, std::string &query, const std::vector<Choice> &choices, int &selected, bool focus,
-            bool &close, const char *placeholder) {
+            bool &close, const char *placeholder, bool prefixed = false) {
     if (focus)
         ImGui::SetKeyboardFocusHere();
     ImGui::SetNextItemWidth(-FLT_MIN);
@@ -27,7 +29,9 @@ int chooser(const char *id, std::string &query, const std::vector<Choice> &choic
     if (ImGui::IsKeyPressed(ImGuiKey_Escape))
         close = true;
 
-    // Rank: fuzzy score on the label (prefix characters stripped by the caller), then the bonus.
+    // Rank: fuzzy score on the label, then the bonus.
+    const bool kind = prefixed && !query.empty() && std::string(">@$#").find(query[0]) != std::string::npos;
+    const std::string_view text = std::string_view(query).substr(kind ? 1 : 0);
     struct Ranked {
         int score;
         std::size_t index;
@@ -35,7 +39,7 @@ int chooser(const char *id, std::string &query, const std::vector<Choice> &choic
     };
     std::vector<Ranked> ranked;
     for (std::size_t i = 0; i < choices.size(); ++i) {
-        auto match = fuzzyMatch(query, choices[i].label);
+        auto match = fuzzyMatch(text, choices[i].label);
         if (match.matched)
             ranked.push_back({match.score + choices[i].bonus, i, std::move(match.positions)});
     }
@@ -222,17 +226,13 @@ void drawFinder(Session &session) {
                          ImGuiWindowFlags_AlwaysAutoResize)) {
         if (opening)
             ImGui::SetWindowFocus();
-        std::string stripped = prefix ? query.substr(1) : query;
-        const std::string before = stripped;
-        const int taken = chooser("##query", stripped, choices, selected, opening, close,
+        const std::string before = query;
+        const int taken = chooser("##query", query, choices, selected, opening, close,
                                   prefix == '>' ? "Run a command"
                                                 : "Trees, nodes, {keys} — > commands  @ nodes here  "
-                                                  "$ keys here  # trees");
-        if (stripped != before)
-            selected = 0;
-        query = (prefix ? std::string(1, prefix) : std::string()) + stripped;
-        // Typing a prefix into an empty query switches the kind.
-        if (!prefix && !query.empty() && (query[0] == '>' || query[0] == '@' || query[0] == '$' || query[0] == '#'))
+                                                  "$ keys here  # trees",
+                                  true);
+        if (query != before)
             selected = 0;
         if (taken >= 0) {
             const auto &target = *targets[std::size_t(taken)];

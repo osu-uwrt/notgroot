@@ -320,7 +320,8 @@ bool parseKey(const std::string &text, ImGuiKey &key, ImGuiKeyChord &mods) {
 }
 } // namespace
 
-// Replays --keys (one press every few frames, after the layout settles), then --type.
+// Replays --keys (one press every few frames, after the layout settles; an item starting with ' types the rest),
+// then --type.
 void App::replay() {
     static std::vector<std::string> keys;
     static bool parsed = false;
@@ -340,7 +341,9 @@ void App::replay() {
         return;
     auto &io = ImGui::GetIO();
     const std::size_t index = std::size_t(step / 3);
-    if (index < keys.size()) {
+    if (index < keys.size() && keys[index][0] == '\'') {
+        io.AddInputCharactersUTF8(keys[index].c_str() + 1);
+    } else if (index < keys.size()) {
         ImGuiKey key = ImGuiKey_None;
         ImGuiKeyChord mods = 0;
         if (!parseKey(keys[index], key, mods)) {
