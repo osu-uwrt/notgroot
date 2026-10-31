@@ -214,7 +214,7 @@ TEST_F(Harness, NodeMenuOffersOnlyWhatApplies) {
     EXPECT_FALSE(applies("edit.delete"));
     EXPECT_TRUE(applies("node.child"));
 
-    // Wrap needs one parent: greyed, with the reason, for nodes from two levels.
+    // Wrap needs one parent: grayed, with the reason, for nodes from two levels.
     session.selection = {sequence.child(2), sequence.child(4).child(0)};
     EXPECT_FALSE(ui::Session::enabled(*session.command("node.wrap")));
     EXPECT_FALSE(session.command("node.wrap")->why().empty());
@@ -318,7 +318,7 @@ TEST_F(Harness, ShortcutsCloseWithEscOrClickOutside) {
     press(ImGuiKey_F1);
     frames(2);
     auto &io = ImGui::GetIO();
-    io.AddMousePosEvent(5, 995); // a corner of the canvas, away from the centred guide
+    io.AddMousePosEvent(5, 995); // a corner of the canvas, away from the centered guide
     frame();
     io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
     frame();

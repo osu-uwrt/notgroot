@@ -21,9 +21,9 @@ struct Outline {
 struct Placer {
     const std::vector<LayoutBox> &boxes;
     const LayoutOptions &options;
-    std::vector<float> offset; // breadth position of each box's centre, relative to its parent's centre
+    std::vector<float> offset; // breadth position of each box's center, relative to its parent's center
 
-    // Lays out a subtree around its root's centre at breadth 0 and returns its outline.
+    // Lays out a subtree around its root's center at breadth 0 and returns its outline.
     Outline place(int index) {
         const auto &box = boxes[std::size_t(index)];
         const float half = breadth(box, options.horizontal) / 2;
@@ -59,7 +59,7 @@ struct Placer {
             }
         }
 
-        // Centre the parent over its first and last child.
+        // Center the parent over its first and last child.
         const float middle = (centres.front() + centres.back()) / 2;
         for (std::size_t i = 0; i < box.children.size(); ++i)
             offset[std::size_t(box.children[i])] = centres[i] - middle;

@@ -121,6 +121,6 @@ The `{}` button beside a value turns text into a key (`2` → `{2}`) and back.
 | Drag a node | moves it, with the rest of the selection when it is selected. Dropped on the ends of a node it goes beside it; on the middle, inside it as the last child. A red cross: it can't go there |
 | Double-click | edits the node; on a SubTree call, opens its tree |
 | The round button under a call | opens the subtree in place, read-only (as Space) |
-| Right-click | the node's menu: what applies to it, greyed with the reason when it can't run now |
+| Right-click | the node's menu: what applies to it, grayed with the reason when it can't run now |
 | Drag on empty canvas, or the middle button | pans |
 | Wheel / Shift+wheel / Ctrl+wheel | scroll / scroll sideways / zoom |

@@ -59,7 +59,7 @@ class History {
     std::vector<Document *> lastTouched_;
 };
 
-// Begins a change on construction and commits it on destruction (unless cancelled).
+// Begins a change on construction and commits it on destruction (unless canceled).
 class Change {
   public:
     Change(History &history, std::string label) : history_(history) {

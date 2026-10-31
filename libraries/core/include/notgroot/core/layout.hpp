@@ -1,6 +1,6 @@
 // Automatic tree layout: the editor never stores positions. Children sit in order beside each other one level below
-// their parent (top-down) or one column right of it (left-right); each subtree is packed against its neighbours by
-// their outlines per level, and a parent is centred over its children.
+// their parent (top-down) or one column right of it (left-right); each subtree is packed against its neighbors by
+// their outlines per level, and a parent is centered over its children.
 #pragma once
 #include <vector>
 
@@ -16,9 +16,9 @@ struct LayoutRect {
 
 struct LayoutOptions {
     bool horizontal = false; // left-right instead of top-down
-    float siblingGap = 24;   // between neighbours
+    float siblingGap = 24;   // between neighbors
     float levelGap = 48;     // between levels
-    float subtreeGap = 36;   // extra between neighbouring subtrees' outlines
+    float subtreeGap = 36;   // extra between neighboring subtrees' outlines
 };
 
 // Lays out the tree rooted at `root` (boxes not reachable from it keep a zero rect). The root's box starts at (0, 0).

@@ -52,7 +52,7 @@ saving writes only the files you changed. Includes are recomputed on save, so yo
     read-only there; calls inside it open the same way. Double-click or Ctrl+Enter opens it in its own tab.
   - Selection: Ctrl/Shift+click, Shift+drag for a box, and keys for siblings, a whole branch or every node of one
     type.
-  - Right-click shows only what applies to that node; what can't run right now is greyed, with the reason.
+  - Right-click shows only what applies to that node; what can't run right now is grayed, with the reason.
 - **Inspector.**
   - Edits a node's name and ports.
   - The `{}` button switches a value between text and a key.

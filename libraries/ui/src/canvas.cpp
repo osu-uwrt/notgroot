@@ -816,7 +816,7 @@ void searchBar(Session &session, const Scene &scene, int current) {
     }
 }
 
-// The node menu: only what applies to the node; what can't run right now is greyed, with the reason.
+// The node menu: only what applies to the node; what can't run right now is grayed, with the reason.
 void contextMenu(Session &session) {
     if (!ImGui::BeginPopup("##card"))
         return;
