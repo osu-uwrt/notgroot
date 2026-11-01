@@ -102,6 +102,8 @@ std::unique_ptr<Element> Element::clone() const {
     copy->attributes = attributes;
     copy->text = text;
     copy->line = line;
+    copy->commentsBefore = commentsBefore;
+    copy->commentsAfter = commentsAfter;
     for (const auto &child : children)
         copy->append(child->clone());
     return copy;
@@ -147,7 +149,14 @@ std::unique_ptr<Element> parseXml(const std::string &text, ParseError &error) {
         error.message = "no root element";
         return nullptr;
     }
-    return convert(*document.RootElement());
+    auto root = convert(*document.RootElement());
+    bool before = true;
+    for (auto *node = document.FirstChild(); node; node = node->NextSibling())
+        if (node == document.RootElement())
+            before = false;
+        else if (auto *comment = node->ToComment())
+            (before ? root->commentsBefore : root->commentsAfter).push_back(comment->Value());
+    return root;
 }
 
 std::string escapeAttribute(std::string_view text) {
@@ -212,7 +221,11 @@ void writeElement(std::string &out, const Element &element, int depth) {
 
 std::string writeXml(const Element &root) {
     std::string out = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    for (const auto &comment : root.commentsBefore)
+        out += "<!--" + comment + "-->\n";
     writeElement(out, root, 0);
+    for (const auto &comment : root.commentsAfter)
+        out += "<!--" + comment + "-->\n";
     return out;
 }
 } // namespace notgroot::core

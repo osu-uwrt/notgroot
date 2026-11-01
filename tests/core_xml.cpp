@@ -77,3 +77,13 @@ TEST(Xml, RealTreesRoundTripExactly) {
     EXPECT_GT(files, 10);
     std::cout << "round-tripped " << files << " files from " << trees << '\n';
 }
+
+TEST(Xml, CommentsOutsideTheRootAreKept) {
+    const std::string text = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!-- first -->\n<!-- second -->\n<root "
+                             "BTCPP_format=\"4\"/>\n<!-- last -->\n";
+    EXPECT_EQ(roundTrip(text), text);
+    ParseError error;
+    auto root = parseXml(text, error);
+    ASSERT_TRUE(root);
+    EXPECT_EQ(writeXml(*root->clone()), text);
+}

@@ -21,6 +21,8 @@ struct Element {
     std::vector<std::unique_ptr<Element>> children;
     Element *parent = nullptr;
     int line = 0; // line in the file it was read from (0: made in the editor)
+    // On a document's root: the comments written before and after it.
+    std::vector<std::string> commentsBefore, commentsAfter;
 
     Element() = default;
     explicit Element(std::string tagName) : tag(std::move(tagName)) {}
