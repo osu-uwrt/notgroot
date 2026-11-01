@@ -643,10 +643,7 @@ void drawDialogs(Session &session) {
             }
             ImGui::SameLine();
             if (ImGui::Button("Keep mine (save overwrites it)")) {
-                document->savedTime = std::filesystem::last_write_time(document->path);
-                std::string text;
-                readFile(document->path, text);
-                document->savedText = text;
+                session.workspace.keepEdits(*document);
                 session.conflicts.erase(session.conflicts.begin());
                 ImGui::CloseCurrentPopup();
             }

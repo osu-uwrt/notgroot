@@ -114,6 +114,8 @@ class Workspace {
     std::vector<Document *> changedOnDisk() const;
     // Rereads a document from disk (dropping its edits).
     void reload(Document &);
+    // Takes the disk's current state as the baseline, keeping the edits (a deleted file counts as empty).
+    void keepEdits(Document &);
 
   private:
     Document *load(const std::filesystem::path &, DocumentRole);

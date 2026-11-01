@@ -487,6 +487,12 @@ std::vector<Document *> Workspace::changedOnDisk() const {
     return changed;
 }
 
+void Workspace::keepEdits(Document &document) {
+    document.savedTime = modified(document.path);
+    document.savedText.clear();
+    readFile(document.path, document.savedText);
+}
+
 void Workspace::reload(Document &document) {
     document.error = {};
     document.deleted = false;

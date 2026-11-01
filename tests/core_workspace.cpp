@@ -175,3 +175,14 @@ TEST(Workspace, RealTreesOpenCleanly) {
         }
     }
 }
+
+TEST(Workspace, KeepingEditsOfADeletedFileDoesNotThrow) {
+    ScratchCopy copy("toy");
+    Workspace workspace;
+    openWorkspace(workspace, copy.path());
+    auto *move = workspace.tree("Move")->document;
+    fs::remove(copy.path() / "lib" / "Move.xml");
+    ASSERT_EQ(workspace.changedOnDisk().size(), 1u);
+    EXPECT_NO_THROW(workspace.keepEdits(*move));
+    EXPECT_TRUE(workspace.changedOnDisk().empty());
+}
