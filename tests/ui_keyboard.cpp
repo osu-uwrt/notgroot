@@ -455,3 +455,57 @@ TEST_F(Harness, FailedOpenKeepsTheWorkspaceAndUndo) {
     press(ImGuiKey_Z, ImGuiMod_Ctrl);
     EXPECT_FALSE(session.dirty());
 }
+
+TEST_F(Harness, InspectorFieldCommitsWhenItLosesFocus) {
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_Tab);
+    type("Wait");
+    press(ImGuiKey_Enter);
+    ASSERT_EQ(cursorId(), "Wait");
+    const auto wait = session.cursor.ref;
+    frames(2);
+    type("3.5");
+    EXPECT_EQ(at(wait)->get("seconds"), "");
+
+    // A click on the empty canvas ends the edit.
+    ImGui::GetIO().AddMousePosEvent(50, 950);
+    frames(2);
+    click();
+    EXPECT_EQ(at(wait)->get("seconds"), "3.5");
+}
+
+TEST_F(Harness, InspectorFieldCommitsOnTab) {
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_Tab);
+    type("Wait");
+    press(ImGuiKey_Enter);
+    ASSERT_EQ(cursorId(), "Wait");
+    const auto wait = session.cursor.ref;
+    frames(2);
+    type("3.5");
+    press(ImGuiKey_Tab);
+    EXPECT_EQ(at(wait)->get("seconds"), "3.5");
+}
+
+TEST_F(Harness, SaveFromTheUnsavedDialogShowsTheFloatingDialog) {
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_RightArrow);
+    press(ImGuiKey_DownArrow, ImGuiMod_Alt); // Info floats
+    ASSERT_EQ(core::floatingNodes(session.workspace, "Toy.xml").size(), 1u);
+
+    session.confirmThen([] {});
+    frames(3);
+    ASSERT_EQ(session.dialog.kind, ui::Session::Dialog::Unsaved);
+    // Click down the left edge of the dialog until the Save button gives.
+    ASSERT_NE(ImGui::FindWindowByName("Unsaved changes"), nullptr);
+    const ImVec2 corner = ImGui::FindWindowByName("Unsaved changes")->Pos;
+    for (float y = corner.y + 20; y < corner.y + 120 && session.dialog.kind == ui::Session::Dialog::Unsaved; y += 4) {
+        ImGui::GetIO().AddMousePosEvent(corner.x + 20, y);
+        frames(2);
+        click();
+    }
+    frames(3);
+    EXPECT_EQ(session.dialog.kind, ui::Session::Dialog::Floating);
+    EXPECT_NE(ImGui::FindWindowByName("Can't save: floating nodes"), nullptr);
+}

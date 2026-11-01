@@ -619,7 +619,9 @@ void drawDialogs(Session &session) {
             break;
         }
         if (close) {
-            dialog.kind = Session::Dialog::None;
+            // Save may have raised another dialog (floating nodes): that one stays.
+            if (dialog.kind == Session::Dialog::Kind(kind))
+                dialog.kind = Session::Dialog::None;
             session.focusCanvas = true;
             ImGui::CloseCurrentPopup();
         }
