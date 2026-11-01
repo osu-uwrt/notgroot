@@ -440,3 +440,28 @@ TEST(Search, KeyCompletionAfterABrace) {
     EXPECT_EQ(keyCompletion("{zz", 3, keys), "");
     EXPECT_EQ(keyCompletion("a b{x y", 7, keys), "");
 }
+
+TEST_F(Fixture, GlobalsWrapperIgnoresTheKeyboardMoves) {
+    ASSERT_TRUE(editor.setGlobals("Toy.xml", {{"target", "buoy"}}));
+    const auto rootRef = refOf(workspace, treeBody(*workspace.tree("Toy.xml")->tree)->elements()[1]);
+    const auto before = text("Toy.xml");
+
+    EXPECT_FALSE(editor.move(rootRef, -1).tree.size());
+    EXPECT_FALSE(editor.indent(rootRef, true).tree.size());
+    EXPECT_FALSE(editor.outdent(rootRef, true).tree.size());
+    EXPECT_EQ(text("Toy.xml"), before);
+    EXPECT_NE(readGlobals(*workspace.tree("Toy.xml")->tree).wrapper, nullptr);
+}
+
+TEST(Workspace, RenamingASubtreeInALooseWorkspace) {
+    ScratchCopy copy("toy");
+    std::filesystem::remove(copy.path() / "lib" / "node_models.xml");
+    Workspace workspace;
+    openWorkspace(workspace, copy.path() / "Toy.xml");
+    ASSERT_EQ(workspace.models(), nullptr);
+    History history{workspace};
+    Editor editor{workspace, history};
+    ASSERT_TRUE(editor.renameTree("Settle", "Calm")) << editor.error();
+    EXPECT_TRUE(workspace.tree("Calm"));
+    EXPECT_EQ(workspace.models(), nullptr);
+}

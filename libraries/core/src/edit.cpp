@@ -366,6 +366,8 @@ NodeRef Editor::move(const NodeRef &ref, int delta) {
     if (!element || ref.isTree() || delta == 0)
         return {};
     Element *parent = element->parent;
+    if (isGlobalsPart(*parent))
+        return fail("the globals Script and the root stay in place"), NodeRef();
     const auto count = nodeChildren(*parent).size();
     const auto from = nodeIndexOf(*element);
     const auto to = std::size_t(std::clamp<long>(long(from) + delta, 0, long(count) - 1));
@@ -444,6 +446,8 @@ NodeRef Editor::indent(const NodeRef &ref, bool floating) {
     if (at == 0)
         return fail("no node before this one to move it into"), NodeRef();
     Element *into = siblings[at - 1];
+    if (isGlobalsPart(*element->parent) || isGlobalsPart(*into))
+        return fail("the globals Script and the root stay in place"), NodeRef();
     if (!floating && !acceptsChild(workspace_, *into))
         return fail(nodeId(*into) + " cannot take another child"), NodeRef();
     Change change(history_, "Move into previous");
@@ -457,6 +461,8 @@ NodeRef Editor::outdent(const NodeRef &ref, bool floating) {
     if (!element || ref.path.size() < 2)
         return fail("already at the top of the tree"), NodeRef();
     Element *parent = element->parent, *grand = parent->parent;
+    if (isGlobalsPart(*parent))
+        return fail("the globals Script and the root stay in place"), NodeRef();
     if (!floating && !acceptsChild(workspace_, *grand))
         return fail((grand->tag == "BehaviorTree" ? std::string("the tree") : nodeId(*grand)) +
                     " cannot take another child"),
@@ -751,7 +757,8 @@ bool Editor::renameTree(const std::string &from, const std::string &to) {
             document->root->set("main_tree_to_execute", name);
         }
     }
-    if (const auto *model = workspace_.catalog().find(oldId); model && model->category == Category::SubTree) {
+    if (const auto *model = workspace_.catalog().find(oldId);
+        model && model->category == Category::SubTree && workspace_.models()) {
         change.touch(*workspace_.models());
         auto renamed = *model;
         renamed.id = name;
