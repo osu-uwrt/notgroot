@@ -6,6 +6,7 @@
 //   notgroot-check --print-builtins      BT.CPP's own node models (to compare with content/builtin_models.xml)
 //
 // One line per mission on stdout: "ok<TAB>file<TAB>nodes" or "error<TAB>file<TAB>message". Exit 1 if any failed.
+#include <algorithm>
 #include <behaviortree_cpp/bt_factory.h>
 #include <behaviortree_cpp/xml_parsing.h>
 #include <filesystem>

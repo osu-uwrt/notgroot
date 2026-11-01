@@ -138,15 +138,19 @@ bool FilePicker::open(const std::string &title, const fs::path &start, const std
             else if (errno != EINTR)
                 break;
         close(fd);
+        // Wait without reaping: the pid stays ours (a zombie) until the destructor can no longer signal it.
+        siginfo_t info;
+        while (waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT) < 0 && errno == EINTR) {
+        }
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->pid = 0;
         int status = 0;
         while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
         }
         while (!text.empty() && (text.back() == '\n' || text.back() == '\r'))
             text.pop_back();
-        std::lock_guard<std::mutex> lock(state->mutex);
         if (WIFEXITED(status) && WEXITSTATUS(status) == 0 && !text.empty())
             state->picked = fs::path(text);
-        state->pid = 0;
         state->busy = false;
     }).detach();
     return true;

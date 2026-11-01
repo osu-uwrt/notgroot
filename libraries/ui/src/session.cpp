@@ -457,7 +457,7 @@ void Session::registerCommands() {
     const auto notSiblings = [] { return std::string("Select nodes under one parent"); };
 
     // File
-    add({"file.open", "Open trees folder or file…", "File", ImGuiMod_Ctrl | ImGuiKey_O, false,
+    add({"file.open", "Open trees folder…", "File", ImGuiMod_Ctrl | ImGuiKey_O, false,
          [this] {
              if (browse)
                  browse();

@@ -20,9 +20,14 @@ int main(int argc, char **argv) {
             options.theme = value();
         else if (arg == "--screenshot")
             options.screenshot = value();
-        else if (arg == "--frames")
-            options.frames = std::stoi(value());
-        else if (arg == "--keys")
+        else if (arg == "--frames") {
+            try {
+                options.frames = std::stoi(value());
+            } catch (const std::exception &) {
+                std::cerr << "notgroot: --frames needs a number\n";
+                return 2;
+            }
+        } else if (arg == "--keys")
             options.keys = value();
         else if (arg == "--type")
             options.text = value();
