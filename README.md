@@ -57,7 +57,8 @@ saving writes only the files you changed. Includes are recomputed on save, so yo
   - Right-click shows only what applies to that node; what can't run right now is grayed, with the reason.
 - **Inspector.**
   - Edits a node's name and ports.
-  - The `{}` button switches a value between text and a key.
+  - The `{}` button switches a value between text and a key. A value is a key only when it starts with `{` and ends
+    with `}`; a `{{key}}` is a key named `{key}`.
   - Typing `{` suggests the tree's keys.
   - Also adds preconditions and scripts (`_skipIf`, `_onSuccess`…).
 - **Variables.** The open tree's blackboard keys, in three sections:

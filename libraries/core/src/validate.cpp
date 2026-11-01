@@ -259,8 +259,22 @@ std::vector<Problem> validate(const Workspace &workspace) {
             out.push_back({Severity::Error, document->error.message, document->path, document->error.line, {}, {}});
             continue;
         }
-        if (document->role == DocumentRole::Models)
+        if (document->role == DocumentRole::Models) {
+            // BehaviorTree.CPP applies a subtree port's default to a missing remap, which changes tree logic.
+            if (const auto *list = document->root->firstChild("TreeNodesModel"))
+                for (const auto *model : list->elements())
+                    if (model->tag == "SubTree")
+                        for (const auto *port : model->elements())
+                            if (port->has("default"))
+                                out.push_back({Severity::Warning,
+                                               "SubTree " + model->get("ID") + " port " + port->get("name") +
+                                                   " has default=; subtree ports carry none (contract section 3)",
+                                               document->path,
+                                               port->line,
+                                               {},
+                                               {}});
             continue;
+        }
         if (document->root->tag != "root")
             out.push_back(
                 {Severity::Error, "the root element must be <root>", document->path, document->root->line, {}, {}});

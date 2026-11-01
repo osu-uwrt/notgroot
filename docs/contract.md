@@ -1,6 +1,6 @@
 # notgroot ↔ riptide_autonomy file contract
 
-Version 5. Both sides follow this document; a change is agreed by both, then the version here goes up and
+Version 6. Both sides follow this document; a change is agreed by both, then the version here goes up and
 riptide_autonomy's README summary is updated to match.
 
 notgroot edits the XML that riptide_autonomy's `doTask` runs with BehaviorTree.CPP 4 (apt
@@ -51,7 +51,7 @@ trees/
 - A port is `<input_port>`, `<output_port>` or `<inout_port>` with `name`, an optional `type`, and the description
   as element text.
 - `<SubTree>` ports carry **no `default=`**. BT.CPP ≥ 4.6 applies subtree model defaults to missing remaps,
-  which would change tree logic.
+  which would change tree logic. notgroot flags one as a problem, and `updateNodeModels --check` fails on it.
 - Builtin nodes are not listed in this file. `updateNodeModels --builtins FILE` writes BT.CPP's own models
   (`writeTreeNodesModelXML(factory, true)` with the builtin entries only) in this format. notgroot ships that
   output as `content/builtin_models.xml`, regenerated when the BT.CPP version changes.
@@ -66,7 +66,7 @@ Both sides' writers produce exactly this, so a save that changes nothing changes
   and newline as `&#10;`.
 - An element without children or text closes itself (`<Foo a="1"/>`). An element with only text is on one line:
   `<input_port name="x">text</input_port>` (text trimmed, escaped `&amp; &lt; &gt;`).
-- Comments are kept where they are. A comment's text is kept verbatim between `<!--` and `-->` (inner newlines,
+- Comments are kept where they are, those before and after the root element included. A comment's text is kept verbatim between `<!--` and `-->` (inner newlines,
   continuation-line indent and the spaces around the text included); its first line is at the element's indent.
 - No blank lines.
 
@@ -74,14 +74,17 @@ notgroot's acceptance test round-trips every file of the workspace byte-for-byte
 
 ## 5. Port values (BehaviorTree.CPP 4)
 
-- A value that starts with `{` and ends with `}` is a blackboard key (`{x}`); anything else is a literal.
+- A value that starts with `{` and ends with `}` is a blackboard key (`{x}`), at least three characters and spaces
+  around it ignored (BT.CPP's `isBlackboardPointer`); anything else is a literal.
 - A `<SubTree ID="X" port="{key}"/>` passes the parent's key; `port="text"` passes the text.
 - Output ports take `{key}`.
 - A port that is not used is left out; `{}` is not a key in BehaviorTree.CPP 4.
 - Subtrees run on their own isolated blackboard: no `_autoremap`, no shared blackboard.
 - Numbers are written as literals, also when passed to a subtree (`<SubTree ID="Move" z="-1.5"/>`), never through a
   key set to its own value. Text passed to a subtree port is typed by what it looks like: `x="2"` makes the
-  subtree's key `x` an `int` (likewise a double or `true`/`false`). Every UWRT input port is untyped
+  subtree's key `x` an `int`, `x="2.5"` a `double`. Only those two are typed (BT.CPP 4.10 reads the whole text as a
+  64-bit integer, with no `.`, `e` or `E`, else as a double; no `+` and no spaces); `true`, `false` and anything else
+  stay text. Every UWRT input port is untyped
   (`BT::AnyTypeAllowed` in `node_models.xml`) so it takes any of them; a typed port that reads `x` with another type
   fails the tree's load (*the port [x] was initially created with type [int]…*). notgroot warns about such values,
   naming the port, and `notgroot-check` registers each port with its `node_models.xml` type, so it reports the same

@@ -534,3 +534,16 @@ TEST_F(Fixture, ExtraNodeInTheGlobalsWrapperIsReportedAsATreeRoot) {
         found |= problem.message.find("a tree has one root") != std::string::npos;
     EXPECT_TRUE(found);
 }
+
+TEST_F(Fixture, SubtreePortDefaultsAreFlagged) {
+    const auto before = validate(workspace).size();
+    auto *port = workspace.models()->root->firstChild("TreeNodesModel")->elements()[0];
+    for (auto *model : workspace.models()->root->firstChild("TreeNodesModel")->elements())
+        if (model->tag == "SubTree")
+            port = model->elements().front();
+    port->set("default", "1");
+    const auto problems = validate(workspace);
+    ASSERT_EQ(problems.size(), before + 1);
+    EXPECT_TRUE(std::any_of(problems.begin(), problems.end(),
+                            [](auto &p) { return p.message.find("has default=") != std::string::npos; }));
+}
