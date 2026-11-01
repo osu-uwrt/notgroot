@@ -2,7 +2,8 @@
 #include "notgroot/core/validate.hpp"
 #include "notgroot/core/globals.hpp"
 #include "notgroot/core/variables.hpp"
-#include <cstdlib>
+#include <charconv>
+#include <cstdint>
 #include <functional>
 #include <set>
 
@@ -19,19 +20,24 @@ const char *severityName(Severity severity) {
     return "error";
 }
 
-namespace {
-// The type BehaviorTree.CPP 4.10 gives text passed into a subtree: bool, int, double, or "" (it stays text).
+// The type BehaviorTree.CPP 4.10 gives text passed into a subtree: int, double, or "" (it stays text, true and false
+// included). Same rules as its xml_parsing.cpp: int64 without ./e/E, else a double, whole string, no + or spaces.
 std::string literalType(const std::string &text) {
-    if (text == "true" || text == "false")
-        return "bool";
-    char *end = nullptr;
-    std::strtol(text.c_str(), &end, 10);
-    if (end && *end == '\0')
-        return "int";
-    std::strtod(text.c_str(), &end);
-    return end && *end == '\0' ? "double" : "";
+    const char *begin = text.data(), *end = begin + text.size();
+    if (text.empty())
+        return "";
+    if (text.find_first_of(".eE") == std::string::npos) {
+        std::int64_t whole = 0;
+        const auto [at, error] = std::from_chars(begin, end, whole);
+        if (error == std::errc() && at == end)
+            return "int";
+    }
+    double real = 0;
+    const auto [at, error] = std::from_chars(begin, end, real);
+    return error == std::errc() && at == end ? "double" : "";
 }
 
+namespace {
 // Every model port in a tree whose value is exactly `value` (SubTree calls pass it on and are skipped).
 void forEachUse(const Element &element, const std::string &value, const Catalog &catalog,
                 const std::function<void(const PortModel &)> &visit) {
@@ -102,7 +108,7 @@ void checkNode(const Workspace &workspace, const Document &document, const Eleme
             add(Severity::Warning, name + ": a value that starts with { and ends with } is one key", name);
     }
     // BehaviorTree.CPP 4 gives a key passed into a subtree as text the type the text looks like ("2": int, "2.5":
-    // double, "true": bool); a node in the subtree whose port has another type (std::string, or double for an int)
+    // double); a node in the subtree whose port has another type (std::string, or double for an int)
     // then fails the tree's load. Untyped ports (BT::AnyTypeAllowed) take anything.
     const auto *called = call ? workspace.tree(id) : nullptr;
     if (called)

@@ -23,4 +23,6 @@ std::vector<Problem> validate(const Workspace &);
 std::vector<Problem> validateTree(const Workspace &, const std::string &treeKey);
 
 const char *severityName(Severity);
+// The type BehaviorTree.CPP 4.10 gives text passed into a subtree: "int", "double", or "" (it stays text).
+std::string literalType(const std::string &text);
 } // namespace notgroot::core

@@ -178,12 +178,24 @@ int minChildren(Category category) {
     }
 }
 
+namespace {
+// BehaviorTree.CPP's isBlackboardPointer: spaces around {key} are ignored, and "{}" is not one.
+std::string_view trimmed(std::string_view value) {
+    while (!value.empty() && value.front() == ' ')
+        value.remove_prefix(1);
+    while (!value.empty() && value.back() == ' ')
+        value.remove_suffix(1);
+    return value;
+}
+} // namespace
+
 bool isKeyReference(std::string_view value) {
-    return value.size() >= 2 && value.front() == '{' && value.back() == '}';
+    value = trimmed(value);
+    return value.size() >= 3 && value.front() == '{' && value.back() == '}';
 }
 
 std::string keyOf(std::string_view value) {
-    return isKeyReference(value) ? std::string(value.substr(1, value.size() - 2)) : std::string();
+    return isKeyReference(value) ? std::string(trimmed(value).substr(1, trimmed(value).size() - 2)) : std::string();
 }
 
 std::vector<std::string> keysMentioned(std::string_view value) {

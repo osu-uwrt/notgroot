@@ -496,3 +496,22 @@ TEST(Rename, FollowsBareKeysInScriptsAndGlobals) {
     ASSERT_TRUE(editor.setSubtreePorts("Move", ports, {{"x", "gx"}})) << editor.error();
     EXPECT_EQ(readGlobals(*workspace.tree("Move")->tree).globals, (std::vector<Global>{{"f", "{gx}_f"}}));
 }
+
+TEST(Validate, LiteralTypesFollowBehaviorTree) {
+    EXPECT_EQ(literalType("2"), "int");
+    EXPECT_EQ(literalType("-2"), "int");
+    EXPECT_EQ(literalType("99999999999"), "int");
+    EXPECT_EQ(literalType("2.5"), "double");
+    EXPECT_EQ(literalType("1e3"), "double");
+    for (const char *text : {"true", "false", "+5", " 5", "5 ", "", "a", "1;2", "0x10"})
+        EXPECT_EQ(literalType(text), "") << text;
+}
+
+TEST(Models, KeyReferencesFollowBehaviorTree) {
+    EXPECT_TRUE(isKeyReference("{x}"));
+    EXPECT_TRUE(isKeyReference("  {x} "));
+    EXPECT_EQ(keyOf(" {x}"), "x");
+    EXPECT_FALSE(isKeyReference("{}"));
+    EXPECT_TRUE(isKeyReference("{ }"));
+    EXPECT_FALSE(isKeyReference("{x"));
+}
