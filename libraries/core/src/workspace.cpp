@@ -127,13 +127,13 @@ void Workspace::loadIncludes(Document &document, int depth) {
 }
 
 bool Workspace::open(const fs::path &target, std::string &error) {
-    close();
     std::error_code fsError;
     const auto path = fs::weakly_canonical(fs::absolute(target), fsError);
     if (fsError || !fs::exists(path)) {
         error = "no such file or directory: " + target.string();
         return false;
     }
+    close();
 
     // The workspace directory: the target, its trees/ subfolder, or the folder holding the file (or its lib/).
     if (fs::is_directory(path)) {

@@ -424,3 +424,34 @@ TEST_F(Harness, AddGlobalFromThePanel) {
               (std::vector<core::Global>{{"speed", ""}}));
     EXPECT_EQ(session.variables("Move").keys.at("speed").scope, core::Scope::Global);
 }
+
+TEST_F(Harness, OpeningAsksBeforeDroppingEdits) {
+    bool opened = false;
+    session.confirmThen([&] { opened = true; });
+    EXPECT_TRUE(opened); // nothing edited yet
+
+    opened = false;
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_Delete);
+    ASSERT_TRUE(session.dirty());
+    session.confirmThen([&] { opened = true; });
+    frames(3);
+    EXPECT_FALSE(opened);
+    EXPECT_EQ(session.dialog.kind, ui::Session::Dialog::Unsaved);
+    press(ImGuiKey_Escape);
+    EXPECT_FALSE(opened);
+    EXPECT_TRUE(session.dirty());
+}
+
+TEST_F(Harness, FailedOpenKeepsTheWorkspaceAndUndo) {
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_Delete);
+    ASSERT_TRUE(session.history.canUndo());
+
+    std::string error;
+    EXPECT_FALSE(session.open(copy.path() / "gone", error));
+    EXPECT_FALSE(session.workspace.trees().empty());
+    EXPECT_TRUE(session.history.canUndo());
+    press(ImGuiKey_Z, ImGuiMod_Ctrl);
+    EXPECT_FALSE(session.dirty());
+}

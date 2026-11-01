@@ -34,6 +34,7 @@ class App {
     void dockspace();
     void defaultLayout(unsigned dock);
     void openWorkspace(const std::filesystem::path &);
+    void loadWorkspace(const std::filesystem::path &);
     void updateTitle();
     // Quits now, or asks first when trees have unsaved edits.
     void quit();

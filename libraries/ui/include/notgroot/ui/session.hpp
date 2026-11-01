@@ -70,6 +70,7 @@ class Session {
     bool open(const std::filesystem::path &, std::string &error);
     bool loadBuiltinModels(const std::filesystem::path &, std::string &error);
     void save();
+    void confirmThen(std::function<void()> action); // runs it now, or after the unsaved-changes dialog
     bool dirty() const;
     // Checks the files on disk (call every second or so): clean documents reload, edited ones are listed.
     void pollDisk();

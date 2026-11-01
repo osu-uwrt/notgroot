@@ -42,6 +42,15 @@ bool Session::open(const std::filesystem::path &path, std::string &error) {
     return true;
 }
 
+void Session::confirmThen(std::function<void()> action) {
+    if (!dirty()) {
+        action();
+        return;
+    }
+    afterUnsaved = std::move(action);
+    ask(Dialog::Unsaved);
+}
+
 bool Session::dirty() const {
     for (const auto &document : workspace.documents())
         if (document->dirty())

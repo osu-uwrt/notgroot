@@ -96,6 +96,11 @@ App::App(Options options) : opt_(std::move(options)) {
 }
 
 void App::openWorkspace(const fs::path &path) {
+    // Edits would be lost, so ask first.
+    session_.confirmThen([this, path] { loadWorkspace(path); });
+}
+
+void App::loadWorkspace(const fs::path &path) {
     std::string error;
     if (!session_.open(path, error)) {
         session_.status(error, true);
@@ -123,16 +128,10 @@ void App::openWorkspace(const fs::path &path) {
 }
 
 void App::quit() {
-    if (!session_.dirty()) {
+    session_.confirmThen([this] {
         closing_ = true;
         window_->requestClose();
-        return;
-    }
-    session_.afterUnsaved = [this] {
-        closing_ = true;
-        window_->requestClose();
-    };
-    session_.ask(ui::Session::Dialog::Unsaved);
+    });
 }
 
 void App::updateTitle() {
