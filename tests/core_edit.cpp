@@ -5,6 +5,7 @@
 #include "notgroot/core/validate.hpp"
 #include "notgroot/core/variables.hpp"
 #include "test_support.hpp"
+#include <fstream>
 #include <gtest/gtest.h>
 
 using namespace notgroot::core;
@@ -464,4 +465,34 @@ TEST(Workspace, RenamingASubtreeInALooseWorkspace) {
     ASSERT_TRUE(editor.renameTree("Settle", "Calm")) << editor.error();
     EXPECT_TRUE(workspace.tree("Calm"));
     EXPECT_EQ(workspace.models(), nullptr);
+}
+
+TEST(Rename, FollowsBareKeysInScriptsAndGlobals) {
+    ScratchCopy copy("toy");
+    std::string xml;
+    ASSERT_TRUE(readFile(copy.path() / "Toy.xml", xml));
+    const auto at = xml.find("<Info");
+    xml.insert(at, "<Script code=\"depth += 1; other := depth\"/>\n"
+                   "<Precondition if=\"depth == 3\" else=\"SUCCESS\"><AlwaysSuccess/></Precondition>\n");
+    xml.replace(xml.find("<Info"), 5, "<Info _skipIf=\"depth &gt; 5\"");
+    std::ofstream(copy.path() / "Toy.xml") << xml;
+
+    Workspace workspace;
+    openWorkspace(workspace, copy.path());
+    History history{workspace};
+    Editor editor{workspace, history};
+    EXPECT_GT(editor.renameKey("Toy.xml", "depth", "dive"), 0);
+    const auto text = writeXml(*workspace.tree("Toy.xml")->document->root);
+    EXPECT_NE(text.find("code=\"dive += 1; other := dive\""), std::string::npos);
+    EXPECT_NE(text.find("if=\"dive == 3\""), std::string::npos);
+    EXPECT_NE(text.find("_skipIf=\"dive &gt; 5\""), std::string::npos);
+
+    // The ports dialog renames a port inside the subtree, globals included.
+    ASSERT_TRUE(editor.setGlobals("Move", {{"f", "{x}_f"}})) << editor.error();
+    auto ports = workspace.subtreeModel("Move").ports;
+    for (auto &port : ports)
+        if (port.name == "x")
+            port.name = "gx";
+    ASSERT_TRUE(editor.setSubtreePorts("Move", ports, {{"x", "gx"}})) << editor.error();
+    EXPECT_EQ(readGlobals(*workspace.tree("Move")->tree).globals, (std::vector<Global>{{"f", "{gx}_f"}}));
 }

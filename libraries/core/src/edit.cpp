@@ -588,6 +588,10 @@ int renameKeyIn(const Workspace &workspace, Element &tree, const std::string &fr
     forEachNode(tree, [&](Element &node) {
         const auto *model = workspace.catalog().find(isSubTree(node) ? std::string() : nodeId(node));
         for (auto &attribute : node.attributes) {
+            // Bare names in scripts.
+            if (attribute.name != "_autoremap" && isScriptAttribute(nodeId(node), attribute.name) &&
+                renameScriptKey(attribute.value, from, to))
+                ++changed;
             if (isReservedAttribute(attribute.name) && attribute.name != "_autoremap")
                 continue;
             const auto *port = model ? model->port(attribute.name) : nullptr;

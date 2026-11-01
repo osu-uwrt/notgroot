@@ -29,10 +29,16 @@ unsigned accessOf(const PortModel *port) {
     return Read;
 }
 
-// Keys a script names: assigned ("key := value", "key = value", "key += 1") or read (any other name). Quoted
-// text, numbers and true/false are not keys.
-std::vector<std::string> scriptKeys(const std::string &code, unsigned access) {
-    std::vector<std::string> keys;
+// One key name in a script: where it starts and how the script touches it.
+struct ScriptKey {
+    std::string name;
+    std::size_t at;
+    bool assigns, compound;
+};
+
+// Keys a script names, in order. Quoted text, numbers, true/false and @root keys are not keys.
+std::vector<ScriptKey> scriptTokens(const std::string &code) {
+    std::vector<ScriptKey> keys;
     char quote = 0;
     for (std::size_t i = 0; i < code.size(); ++i) {
         if (quote) {
@@ -60,20 +66,39 @@ std::vector<std::string> scriptKeys(const std::string &code, unsigned access) {
                              (at < code.size() && code[at] == '=' && (at + 1 >= code.size() || code[at + 1] != '='));
         const auto name = code.substr(i, end - i);
         // "@key" is the root blackboard's: not this tree's.
-        const bool counted = code[i] != '@' && name != "true" && name != "false";
-        if (counted && (((access & Write) && (assigns || compound)) || ((access & Read) && !assigns)))
-            keys.push_back(name);
+        if (code[i] != '@' && name != "true" && name != "false")
+            keys.push_back({name, i, assigns, compound});
         i = end;
     }
     return keys;
 }
 
-// Attributes holding script code.
-bool isScript(const std::string &id, const std::string &name) {
+// Keys a script names: assigned ("key := value", "key = value", "key += 1") or read (any other name).
+std::vector<std::string> scriptKeys(const std::string &code, unsigned access) {
+    std::vector<std::string> keys;
+    for (const auto &key : scriptTokens(code))
+        if (((access & Write) && (key.assigns || key.compound)) || ((access & Read) && !key.assigns))
+            keys.push_back(key.name);
+    return keys;
+}
+
+} // namespace
+
+bool isScriptAttribute(const std::string &id, const std::string &name) {
     return (!name.empty() && name[0] == '_') || ((id == "Script" || id == "ScriptCondition") && name == "code") ||
            (id == "Precondition" && name == "if");
 }
-} // namespace
+
+bool renameScriptKey(std::string &code, const std::string &from, const std::string &to) {
+    bool changed = false;
+    const auto keys = scriptTokens(code);
+    for (auto key = keys.rbegin(); key != keys.rend(); ++key)
+        if (key->name == from) {
+            code.replace(key->at, from.size(), to);
+            changed = true;
+        }
+    return changed;
+}
 
 std::vector<KeyUse> keyUses(const Workspace &workspace, const Element &node, const NodeRef &ref) {
     std::vector<KeyUse> uses;
@@ -85,7 +110,7 @@ std::vector<KeyUse> keyUses(const Workspace &workspace, const Element &node, con
         if (name == "ID" || name == "name")
             continue;
         // Preconditions, post-scripts and Script code: the keys they read and assign.
-        if (isScript(id, name)) {
+        if (isScriptAttribute(id, name)) {
             if (!scriptKeys(value, Read).empty())
                 uses.push_back({ref, name, Read, false, true});
             if (!scriptKeys(value, Write).empty())

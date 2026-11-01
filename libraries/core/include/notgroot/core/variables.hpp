@@ -41,4 +41,8 @@ struct TreeVariables {
 TreeVariables analyzeVariables(const Workspace &, const std::string &tree);
 // How a node's attribute touches the blackboard: the keys it reads or writes.
 std::vector<KeyUse> keyUses(const Workspace &, const Element &node, const NodeRef &ref);
+// Attributes holding script code (Script, ScriptCondition, Precondition, and the _ scripts).
+bool isScriptAttribute(const std::string &id, const std::string &name);
+// Renames a bare key in script code; true if it was named.
+bool renameScriptKey(std::string &code, const std::string &from, const std::string &to);
 } // namespace notgroot::core
