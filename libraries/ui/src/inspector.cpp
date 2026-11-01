@@ -319,7 +319,9 @@ void drawInspector(Session &session) {
                     tip += (tip.empty() ? "" : "\n") + std::string("a key's name, written bare (no braces)");
                 row(port.name, directionBadge(port.direction), directionColor(port.direction), tip, true);
             }
-        for (const auto &attribute : element->attributes) {
+        // A copy: the × button erases from the element's own list mid-loop.
+        const auto attributes = element->attributes;
+        for (const auto &attribute : attributes) {
             if (attribute.name == "ID" || attribute.name == "name" || (known && model.port(attribute.name)) ||
                 isReservedAttribute(attribute.name))
                 continue;
@@ -327,7 +329,7 @@ void drawInspector(Session &session) {
                 known ? "Not a port of " + id + (call ? " (node_models.xml)" : ": BehaviorTree.CPP rejects it") : "",
                 true);
         }
-        for (const auto &attribute : element->attributes)
+        for (const auto &attribute : attributes)
             if (isReservedAttribute(attribute.name) && attribute.name != "ID" && attribute.name != "name")
                 row(attribute.name, "IF", palette().muted, "BehaviorTree.CPP script attribute", true);
         ImGui::EndTable();

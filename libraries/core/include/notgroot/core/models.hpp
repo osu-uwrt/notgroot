@@ -62,7 +62,7 @@ bool isSubTree(const Element &node);
 bool isReservedAttribute(std::string_view name);
 // The node's category: its model's, else the explicit tag's, else Unknown.
 Category nodeCategory(const Element &node, const Catalog &);
-// How many children a node of this category takes: leaves none, decorators and subtrees one... (-1: any number).
+// How many children a node of this category takes: leaves none, decorators one, subtrees none... (-1: any number).
 int maxChildren(Category);
 int minChildren(Category);
 

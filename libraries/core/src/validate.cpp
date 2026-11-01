@@ -79,9 +79,9 @@ void checkNode(const Workspace &workspace, const Document &document, const Eleme
         const auto *parent = node.parent;
         add(Severity::Error,
             "floating: " +
-                (parent->tag == "BehaviorTree"                      ? std::string("a tree has one root")
-                 : maxChildren(nodeCategory(*parent, catalog)) == 0 ? nodeId(*parent) + " takes no children"
-                                                                    : nodeId(*parent) + " takes one child") +
+                (parent->tag == "BehaviorTree" || isGlobalsPart(*parent) ? std::string("a tree has one root")
+                 : maxChildren(nodeCategory(*parent, catalog)) == 0      ? nodeId(*parent) + " takes no children"
+                                                                         : nodeId(*parent) + " takes one child") +
                 "; move it on (Alt+arrows) before saving");
     }
     if (children < least)

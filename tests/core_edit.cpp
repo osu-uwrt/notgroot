@@ -525,3 +525,12 @@ TEST_F(Fixture, MakeGlobalRefusesAConditionalSetter) {
     resolve(workspace, setter)->erase("_skipIf");
     EXPECT_TRUE(editor.makeGlobal(setter, false)) << editor.error();
 }
+
+TEST_F(Fixture, ExtraNodeInTheGlobalsWrapperIsReportedAsATreeRoot) {
+    ASSERT_TRUE(editor.setGlobals("Toy.xml", {{"target", "buoy"}}));
+    treeBody(*workspace.tree("Toy.xml")->tree)->append(std::make_unique<Element>("AlwaysSuccess"));
+    bool found = false;
+    for (const auto &problem : validateTree(workspace, "Toy.xml"))
+        found |= problem.message.find("a tree has one root") != std::string::npos;
+    EXPECT_TRUE(found);
+}
