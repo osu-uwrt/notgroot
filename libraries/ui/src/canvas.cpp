@@ -23,6 +23,7 @@ struct Row {
     bool modeled = true;  // a port of the node's model (else an attribute BT.CPP would reject)
     bool special = false; // _skipIf and friends
     bool missing = false; // a model port the node does not set
+    std::string shown;    // value cut to fit the card
 };
 
 struct Card {
@@ -132,7 +133,7 @@ void describe(Session &session, Card &card, const Element &element) {
     // Ports in the model's order, then attributes the model does not know, then the special ones.
     if (model)
         for (const auto &port : model->ports) {
-            Row row{port.name, element.get(port.name), port.direction, true, false, !element.has(port.name)};
+            Row row{port.name, element.get(port.name), port.direction, true, false, !element.has(port.name), {}};
             if (row.missing && !card.call)
                 row.value = port.defaultValue;
             card.rows.push_back(row);
@@ -141,8 +142,13 @@ void describe(Session &session, Card &card, const Element &element) {
         if (attribute.name == "ID" || attribute.name == "name" || (model && model->port(attribute.name)))
             continue;
         const bool special = isReservedAttribute(attribute.name);
-        card.rows.push_back(
-            {attribute.name, attribute.value, PortDirection::Input, special || !model || card.call, special, false});
+        card.rows.push_back({attribute.name,
+                             attribute.value,
+                             PortDirection::Input,
+                             special || !model || card.call,
+                             special,
+                             false,
+                             {}});
     }
     // Comments right above the node.
     if (element.parent)
@@ -163,8 +169,8 @@ void measure(Card &card, const Metrics &m) {
         width = std::max(width, textWidth(m.body, card.subtitle));
     const float badge = textWidth(m.body, "OUT") + m.pad;
     for (auto &row : card.rows) {
-        row.value = fitText(m.body, row.value, m.maxValue);
-        width = std::max(width, badge + textWidth(m.body, row.port) + m.pad + textWidth(m.body, row.value));
+        row.shown = fitText(m.body, row.value, m.maxValue);
+        width = std::max(width, badge + textWidth(m.body, row.port) + m.pad + textWidth(m.body, row.shown));
     }
     card.size.x = std::clamp(width + 2 * m.pad, m.minWidth, m.maxWidth);
     float height = m.header;
@@ -228,7 +234,7 @@ void build(Session &session, Scene &scene, const Element &element, const CardKey
             card.color = treeColor(session.workspace, entry->id);
         if (entry && key.ref.tree == entry->id)
             for (const auto &port : session.workspace.subtreeModel(entry->id).ports)
-                card.rows.push_back({port.name, "", port.direction, true, false, false});
+                card.rows.push_back({port.name, "", port.direction, true, false, false, {}});
     } else
         describe(session, card, element);
     auto &view = session.view(session.active);
@@ -558,13 +564,13 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
              ImGui::GetColorU32(withAlpha(row.missing ? withAlpha(palette().muted, .6f) : palette().muted, alpha)),
              row.port.c_str());
         const std::string &value = row.value;
-        const float valueX = b.x - m.pad * z - drawnWidth(view, value);
+        const float valueX = b.x - m.pad * z - drawnWidth(view, row.shown);
         ImVec4 ink = palette().text;
         if (isKeyReference(value))
             ink = session.keyColor(card.key.ref.tree, keyOf(value));
         else if (row.missing)
             ink = withAlpha(palette().muted, .6f);
-        text(draw, view.body, view.bodySize, {valueX, y}, ImGui::GetColorU32(withAlpha(ink, alpha)), value.c_str());
+        text(draw, view.body, view.bodySize, {valueX, y}, ImGui::GetColorU32(withAlpha(ink, alpha)), row.shown.c_str());
         y += line + m.rowGap * z;
     }
 
