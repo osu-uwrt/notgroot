@@ -35,12 +35,6 @@ bool hasModels(const fs::path &directory) {
     std::error_code error;
     return fs::is_regular_file(directory / "lib" / "node_models.xml", error);
 }
-
-// The text a document had when it was read or saved, kept beside it (the dirty check compares against it).
-std::map<const Document *, std::string> &cleanTexts() {
-    static std::map<const Document *, std::string> texts;
-    return texts;
-}
 } // namespace
 
 std::string Document::text() const {
@@ -50,8 +44,7 @@ std::string Document::text() const {
 bool Document::dirty() const {
     if (deleted)
         return onDisk;
-    const auto clean = cleanTexts().find(this);
-    return !onDisk || clean == cleanTexts().end() || text() != clean->second;
+    return !onDisk || !cleanText || text() != *cleanText;
 }
 
 std::vector<Element *> Document::trees() const {
@@ -80,8 +73,6 @@ bool Workspace::loadBuiltinModels(const fs::path &file, std::string &error) {
 }
 
 void Workspace::close() {
-    for (const auto &document : documents_)
-        cleanTexts().erase(document.get());
     documents_.clear();
     models_ = nullptr;
     directory_.clear();
@@ -107,7 +98,7 @@ Document *Workspace::load(const fs::path &path, DocumentRole role) {
         document->error = {"cannot read " + path.string(), 0};
     else
         document->root = parseXml(document->savedText, document->error);
-    cleanTexts()[document.get()] = canonical(*document);
+    document->cleanText = canonical(*document);
     return add(std::move(document));
 }
 
@@ -464,7 +455,7 @@ std::vector<fs::path> Workspace::save(std::vector<std::string> &errors) {
         document->savedText = text;
         document->savedTime = modified(document->path);
         document->onDisk = true;
-        cleanTexts()[document.get()] = text;
+        document->cleanText = text;
         written.push_back(document->path);
     }
     reindex();
@@ -503,7 +494,7 @@ void Workspace::reload(Document &document) {
         document.savedText.clear();
         document.error = {"cannot read " + document.path.string(), 0};
     }
-    cleanTexts()[&document] = canonical(document);
+    document.cleanText = canonical(document);
     reindex();
 }
 } // namespace notgroot::core

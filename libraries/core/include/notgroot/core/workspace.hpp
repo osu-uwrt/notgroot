@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -21,6 +22,7 @@ struct Document {
     std::filesystem::file_time_type savedTime; // its modification time then
     bool onDisk = false;                       // the file existed when read / was written
     bool deleted = false;                      // removed in the editor: deleted from disk on save
+    std::optional<std::string> cleanText;      // what it was when read or saved (the dirty check compares to it)
 
     std::string text() const; // what saving would write
     bool dirty() const;
