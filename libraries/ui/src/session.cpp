@@ -79,8 +79,13 @@ void Session::save() {
     int bad = 0;
     for (const auto &problem : problems())
         bad += problem.severity == Severity::Error;
-    if (!written.empty() && check_ && check_->available() && !workspace.loose())
-        check_->start(workspace);
+    if (!written.empty() && check_ && check_->available() && !workspace.loose()) {
+        // One already running is out of date: run again once it finishes.
+        if (check_->running())
+            checkAgain_ = true;
+        else
+            check_->start(workspace);
+    }
     if (written.empty())
         status("Nothing to save");
     else
@@ -116,6 +121,11 @@ void Session::pollCheck() {
     auto result = check_->take();
     if (!result)
         return;
+    if (checkAgain_) {
+        checkAgain_ = false;
+        check_->start(workspace);
+        return;
+    }
     btProblems = std::move(result->problems);
     for (auto &problem : btProblems) // on the mission's main tree, so the panel can go there
         for (const auto &key : workspace.missions())

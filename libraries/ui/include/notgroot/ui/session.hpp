@@ -182,6 +182,7 @@ class Session {
     void validateCursor();
     std::map<std::string, ViewState> views_;
     std::unique_ptr<core::BtCheck> check_;
+    bool checkAgain_ = false; // saved again while a check ran
     unsigned problemsVersion_ = ~0u;
     std::vector<core::Problem> problems_;
     std::map<core::NodeRef, int> severity_;

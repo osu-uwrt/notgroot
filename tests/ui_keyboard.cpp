@@ -4,9 +4,12 @@
 #include "notgroot/ui/style.hpp"
 #include "notgroot/ui/theme.hpp"
 #include "test_support.hpp"
+#include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <imgui_internal.h>
+#include <thread>
 
 using namespace notgroot;
 using notgroot::test::ScratchCopy;
@@ -508,4 +511,32 @@ TEST_F(Harness, SaveFromTheUnsavedDialogShowsTheFloatingDialog) {
     frames(3);
     EXPECT_EQ(session.dialog.kind, ui::Session::Dialog::Floating);
     EXPECT_NE(ImGui::FindWindowByName("Can't save: floating nodes"), nullptr);
+}
+
+TEST_F(Harness, SavingWhileACheckRunsChecksAgain) {
+    // A stand-in checker that logs each run.
+    const auto log = copy.path() / "runs.log";
+    const auto script = copy.path() / "check.sh";
+    std::ofstream(script) << "#!/bin/sh\nsleep 0.3\necho run >> " << log.string() << "\n";
+    std::filesystem::permissions(script, std::filesystem::perms::owner_all);
+    session.setChecker(script);
+
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_Delete);
+    press(ImGuiKey_S, ImGuiMod_Ctrl);
+    ASSERT_TRUE(session.checking());
+    press(ImGuiKey_Delete);
+    press(ImGuiKey_S, ImGuiMod_Ctrl);
+
+    const auto runs = [&] {
+        std::string text;
+        core::readFile(log, text);
+        return std::count(text.begin(), text.end(), '\n');
+    };
+    for (int i = 0; i < 100 && (session.checking() || runs() < 2); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        session.pollCheck();
+    }
+    EXPECT_EQ(runs(), 2);
 }
