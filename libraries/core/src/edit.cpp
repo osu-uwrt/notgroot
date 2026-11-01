@@ -1026,6 +1026,10 @@ bool Editor::makeGlobal(const NodeRef &ref, bool strict) {
         return fail("only SetBlackboardV3 and Format nodes can become globals");
     if (const auto problem = globalProblem(global); !problem.empty())
         return fail(problem);
+    // A global always runs: a _skipIf, _while or other reserved attribute would be dropped.
+    for (const auto &attribute : element->attributes)
+        if (isReservedAttribute(attribute.name))
+            return fail("it has " + attribute.name + ", which a global can't keep");
 
     // Set only here, and read nowhere before it (uses come in document order).
     const auto variables = analyzeVariables(workspace_, ref.tree);

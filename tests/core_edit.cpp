@@ -515,3 +515,13 @@ TEST(Models, KeyReferencesFollowBehaviorTree) {
     EXPECT_TRUE(isKeyReference("{ }"));
     EXPECT_FALSE(isKeyReference("{x"));
 }
+
+TEST_F(Fixture, MakeGlobalRefusesAConditionalSetter) {
+    const auto setter = sequence().child(1); // after the comment
+    ASSERT_EQ(nodeId(*resolve(workspace, setter)), "SetBlackboardV3");
+    resolve(workspace, setter)->set("_skipIf", "depth > 3");
+    EXPECT_FALSE(editor.makeGlobal(setter, false));
+    EXPECT_NE(editor.error().find("_skipIf"), std::string::npos);
+    resolve(workspace, setter)->erase("_skipIf");
+    EXPECT_TRUE(editor.makeGlobal(setter, false)) << editor.error();
+}
