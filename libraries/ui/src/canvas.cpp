@@ -698,11 +698,12 @@ void navigate(Session &session, const Scene &scene, int current) {
     }
 
     int target = -1;
-    if (steer && ImGui::IsKeyPressed(toParent))
+    static CardKey lastChild; // the card we left going up
+    if (steer && ImGui::IsKeyPressed(toParent)) {
         target = card.parent;
-    else if (steer && ImGui::IsKeyPressed(toChild) && !card.children.empty()) {
+        lastChild = card.key;
+    } else if (steer && ImGui::IsKeyPressed(toChild) && !card.children.empty()) {
         // Back down to the child we came up from, if any.
-        static CardKey lastChild;
         target = card.children.front();
         for (const int c : card.children)
             if (scene.cards[std::size_t(c)].key == lastChild)
@@ -916,6 +917,10 @@ void drawCanvas(Session &session) {
         static std::string shown;
         for (const auto &key : session.tabs) {
             const auto *entry = session.workspace.tree(key);
+            if (!entry) { // removed by an undo or a rename
+                closing = key;
+                continue;
+            }
             bool open = true;
             const bool dirty = entry && entry->document->dirty();
             ImGuiTabItemFlags flags = dirty ? ImGuiTabItemFlags_UnsavedDocument : 0;

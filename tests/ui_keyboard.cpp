@@ -540,3 +540,25 @@ TEST_F(Harness, SavingWhileACheckRunsChecksAgain) {
     }
     EXPECT_EQ(runs(), 2);
 }
+
+TEST_F(Harness, TabsOfTreesThatUndoRemovedClose) {
+    ASSERT_FALSE(session.editor.createSubtree("Fresh").empty());
+    session.openTree("Fresh");
+    frames(3);
+    ASSERT_NE(std::find(session.tabs.begin(), session.tabs.end(), "Fresh"), session.tabs.end());
+    ASSERT_TRUE(session.history.undo());
+    frames(3);
+    EXPECT_EQ(std::find(session.tabs.begin(), session.tabs.end(), "Fresh"), session.tabs.end());
+    EXPECT_EQ(session.active, "Toy.xml");
+}
+
+TEST_F(Harness, DownReturnsToTheChildYouCameUpFrom) {
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_RightArrow);
+    ASSERT_EQ(cursorId(), "Info");
+    press(ImGuiKey_UpArrow);
+    ASSERT_EQ(cursorId(), "Sequence");
+    press(ImGuiKey_DownArrow);
+    EXPECT_EQ(cursorId(), "Info");
+}
