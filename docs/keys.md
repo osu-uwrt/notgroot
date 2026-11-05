@@ -58,9 +58,10 @@ Wrap and extract work on nodes under one parent; delete, copy, cut and duplicate
 
 | Key | View |
 |---|---|
-| Space | fold / unfold a node; on a SubTree call, open the subtree in place (read-only) |
+| Space | fold / unfold a node; on a SubTree call, open the subtree in place (locked: shown, not edited) |
+| Ctrl+U | unlock the subtree opened in place to edit it right there, or lock it again (on a call or a node inside it) |
 | Ctrl+Enter | open the subtree's own tree (on a call or on a node opened in place) |
-| Ctrl+= / Ctrl+- | zoom in / out a step (Ctrl+mouse wheel zooms at the mouse) |
+| Ctrl+= / Ctrl+- | zoom in / out a step (Ctrl+mouse wheel and a touchpad pinch zoom at the mouse) |
 | Ctrl+0 | fit the tree to the view |
 | Ctrl+L | switch between top-down and left-right layout |
 | Ctrl+PageDown / Ctrl+PageUp | next / previous tree tab |
@@ -79,8 +80,7 @@ Wrap and extract work on nodes under one parent; delete, copy, cut and duplicate
 | Alt + ← / → | move the node earlier / later among its siblings |
 | Alt + ↑ | move the node out of its parent, right after it |
 | Alt + ↓ | move the node into the previous sibling, as its last child |
-
-| Delete | delete the selection (and the comments right above each node) |
+| Delete (Backspace) | delete the selection (and the comments right above each node) |
 | Ctrl+X / Ctrl+C / Ctrl+V | cut / copy / paste nodes. Paste goes into the cursor's node, else after it. The clipboard is plain XML, so trees from a text editor or Groot paste too |
 | Ctrl+D | duplicate the selection |
 | Ctrl+E | extract the selection into a new subtree: its ports come from the keys the nodes use |
@@ -90,6 +90,12 @@ Alt+↑ and Alt+↓ always move. Where the new parent can't hold the node (a lea
 child, a tree's second root) the node *floats* there: drawn dotted, with a dotted edge, ready to move on. Saving is
 refused while any node floats; the message lists the trees, and clicking one goes to its floating node.
 
+A subtree opened in place starts locked: grayed, in its own color. Unlocked, its band turns amber with a dashed
+edge, and every edit there goes to its own file (`lib/<ID>.xml`), so it changes every tree that runs it. Locking a
+subtree, or closing it, also locks every subtree under it. A locked subtree inside an unlocked one stands out as a
+gray island with a solid edge. The count above a call says how many trees call it. Its globals sit in a box beside
+the call: a list while locked, editable while unlocked.
+
 ## In the inspector
 
 | Key | Edit |
@@ -98,6 +104,9 @@ refused while any node floats; the message lists the trees, and clicking one goe
 | Esc | cancel and go back to the canvas |
 | `{` | start a key: the tree's keys are suggested. ↑/↓ choose, Tab or Enter take one |
 | Tab | (no suggestion showing) the next field |
+
+A port can also be edited on its card: double-click its row. Enter keeps it, Esc cancels, Tab keeps it and moves to
+the next row, and `{` suggests keys as in the inspector.
 
 The `{}` button beside a value turns text into a key (`2` → `{2}`) and back.
 
@@ -123,8 +132,13 @@ it and closes the brace.
 | Click | puts the cursor on a node. Ctrl+click or Shift+click adds it to the selection or takes it out |
 | Shift + drag on empty canvas | selects the nodes in the box (with Ctrl: adds them) |
 | Drag a node | moves it, with the rest of the selection when it is selected. Dropped on the ends of a node it goes beside it; on the middle, inside it as the last child. A red cross: it can't go there |
-| Double-click | edits the node; on a SubTree call, opens its tree |
-| The round button under a call | opens the subtree in place, read-only (as Space) |
+| Drag from the palette | adds the node the same way: on a node's middle inside it, on its ends beside it. Cards that can take it get a faint ring; elsewhere a red note says why it can't go there |
+| Double-click a port row | edits that value right on the card, which grows with the text |
+| Double-click a node's title | names the node right on the card; on a SubTree call's title, opens its tree; on the tree's own card, renames it |
+| Double-click a node in a locked subtree | opens that subtree in its own tab, on that node |
+| The round button under a call | opens the subtree in place, locked (as Space) |
+| The padlock on an opened call's corner | unlocks it to edit in place, or locks it again (as Ctrl+U) |
 | Right-click | the node's menu: what applies to it, grayed with the reason when it can't run now |
 | Drag on empty canvas, or the middle button | pans |
 | Wheel / Shift+wheel / Ctrl+wheel | scroll / scroll sideways / zoom |
+| Touchpad pinch | zoom at the pointer |

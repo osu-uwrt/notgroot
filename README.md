@@ -50,8 +50,16 @@ saving writes only the files you changed. Includes are recomputed on save, so yo
   - Each port shows IN / OUT / IO, and values that are `{keys}` are drawn in that key's own color everywhere. A
     tree's keys are colored together, so no two look alike (up to 20 keys stay well apart in every theme; larger
     trees get as much spread as the theme's readable colors allow).
-  - Space, or the round button under a call, opens a subtree in place, grayed on a band of its color because it is
-    read-only there; calls inside it open the same way. Double-click or Ctrl+Enter opens it in its own tab.
+  - Above each call, a small count says how many trees call that subtree.
+  - Space, or the round button under a call, opens a subtree in place, grayed on a band of its color that takes in
+    the call, because it starts locked; calls inside it open the same way. Its globals sit in a box beside the call.
+    Click the round padlock on the call's corner (or Ctrl+U) to unlock it: the band turns amber, and the subtree and
+    its globals can be edited right there. Locking it, or closing it, also locks every subtree under it. Double-click
+    the call's title, or Ctrl+Enter, to open it in its own tab.
+  - Double-click a port's row to edit its value right on the card, or a node's title to name it (Enter keeps, Esc
+    cancels, Tab moves to the next row). The card grows with the text as you type. In a locked subtree, a
+    double-click opens the subtree in its own tab on that node.
+  - Zoom with Ctrl+wheel, Ctrl+=/-, or a touchpad pinch (XInput 2.4 gestures, as XWayland and recent X servers send).
   - Selection: Ctrl/Shift+click, Shift+drag for a box, and keys for siblings, a whole branch or every node of one
     type.
   - Right-click shows only what applies to that node; what can't run right now is grayed, with the reason.
@@ -75,7 +83,10 @@ saving writes only the files you changed. Includes are recomputed on save, so yo
   - Keys named in script code (`Precondition if`, `_skipIf` and the other script attributes, `Script`) count as
     reads, or as writes when assigned.
 - **Trees panel and palette.** Missions and subtrees, and every node model, each with a fuzzy filter. Drag a model
-  onto a card, or double-click it, to add it.
+  onto a card (its middle: inside; its ends: beside), or double-click it, to add it. While dragging, the cards that
+  can take it are ringed, and anywhere it can't go a note says why.
+- **Getting started tour.** Shown on the first start and from Help: what differs from Groot, each move with the mouse
+  and with its keys.
 - **Problems.** notgroot checks as you edit, for:
   - unknown nodes and ports, and wrong child counts;
   - SubTree calls to trees that don't exist, and subtrees that call each other in a loop;

@@ -28,7 +28,8 @@ struct CardKey {
     bool operator!=(const CardKey &o) const {
         return !(*this == o);
     }
-    bool readOnly() const {
+    // Shown in place under a call (editable there only while its subtree is unlocked: Session::readOnly).
+    bool inside() const {
         return !origin.empty();
     }
 };
@@ -40,6 +41,7 @@ struct ViewState {
     std::set<std::vector<std::size_t>> folded;
     std::set<std::vector<std::size_t>> opened;         // SubTree calls shown expanded
     std::set<std::vector<core::NodeRef>> openedInside; // calls inside an opened subtree: the calls leading to them
+    std::set<std::string> unlocked;                    // subtrees (by ID) editable where they are opened in place
     bool fit = true;                                   // fit the tree to the view on the next frame
     bool fitted = false; // still as fitted (no pan or zoom since): refit when the view resizes
     ImVec2 size{0, 0};   // the canvas size last frame
@@ -99,8 +101,21 @@ class Session {
     std::vector<core::NodeRef> allNodes() const;
     // The nodes an edit applies to: the selection, else the cursor (when it is editable).
     std::vector<core::NodeRef> targets() const;
+    // A card that can't be edited here: shown in place from a subtree that is locked (as subtrees start).
+    bool readOnly(const CardKey &key) const {
+        return key.inside() && !unlocked(key.ref.tree);
+    }
+    bool unlocked(const std::string &subtree) const;
+    // Locks or unlocks a subtree opened in place, in the active tree's view.
+    void toggleLock(const std::string &subtree);
+    // Locks a subtree and every subtree under it, however deep, in the active tree's view.
+    void lock(const std::string &subtree);
+    // The subtree the cursor is in or on (a node shown in place, or an opened call), else empty.
+    std::string lockTarget();
+    // How many trees (missions or subtrees) call the subtree themselves.
+    int treesUsing(const std::string &subtree) const;
     // Opens the node's tree and puts the cursor on it.
-    void reveal(const core::NodeRef &);
+    void reveal(core::NodeRef); // a copy: it is often the cursor's, which opening the tree resets
     bool revealPending = false; // the canvas scrolls the cursor into view
 
     // A key highlighted on the canvas (from the variables panel or the finder).
@@ -131,6 +146,19 @@ class Session {
     // --- requests between panels ---
     bool focusCanvas = false, focusInspector = false;
     std::string focusPort; // the inspector focuses this port's value
+    // A port value or the name ("name") edited on its card (double-click it); empty port: none. The inspector edits
+    // the same attributes.
+    struct InlineEdit {
+        CardKey card;
+        std::string port;
+        bool fresh = true; // takes the keyboard on its first frame
+        std::string text;  // what is typed so far: the card fits it
+    } inlineEdit;
+    // A touchpad pinch, from the host each frame: how much it has grown since it began (1 at the start).
+    struct Pinch {
+        bool active = false;
+        float scale = 1;
+    } pinch;
     struct Picker {
         bool open = false;
         PickFor purpose = PickFor::Child;
@@ -141,7 +169,11 @@ class Session {
     bool showFinder = false;
     std::string finderPrefix;   // "" anything, ">" commands, "@" nodes here, "$" keys here
     bool showSearch = false;    // Ctrl+F in the canvas
+    bool focusSearch = false;   // its field takes the keyboard (Ctrl+F again while it is open)
     bool showShortcuts = false; // the keyboard guide (F1)
+    bool showTour = false;      // the getting-started pages (first start, Help)
+    int tourPage = 0;
+    std::function<void()> tourDone; // set by the host: remembers the tour was seen
     std::string search;
     struct Dialog {
         enum Kind { None, NewSubtree, NewMission, RenameTree, RenameKey, ExtractSubtree, EditPorts, Unsaved, Floating };
@@ -169,6 +201,10 @@ class Session {
     static bool enabled(const Command &c) {
         return !c.enabled || c.enabled();
     }
+    // A second key for another command: left out of the menus, the finder and the guide.
+    static bool alias(const Command &c) {
+        return c.id == "edit.redo2" || c.id == "edit.delete2";
+    }
     bool canvasFocused = false;   // the canvas window has keyboard focus this frame
     bool canvasHeld = false;      // it had it at the end of the last frame
     std::function<void()> quit;   // set by the host
@@ -193,6 +229,7 @@ class Session {
         std::map<std::string, ImVec4> colors;
     };
     std::map<std::string, KeyColors> keyColors_;
+    mutable std::pair<unsigned, std::map<std::string, int>> treesUsing_{~0u, {}}; // by workspace version
 };
 
 // ImGui text input on a std::string.

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <functional>
 #include <gtest/gtest.h>
 #include <imgui_internal.h>
 #include <thread>
@@ -49,7 +50,10 @@ class Harness : public ::testing::Test {
         ImGui::End();
         ImGui::SetNextWindowPos({1100, 0});
         ImGui::SetNextWindowSize({500, variablesPanel ? 450.f : 1000.f});
-        if (ImGui::Begin("Inspector"))
+        if (palettePanel) {
+            if (ImGui::Begin("Palette"))
+                ui::drawPalette(session);
+        } else if (ImGui::Begin("Inspector"))
             ui::drawInspector(session);
         ImGui::End();
         if (variablesPanel) {
@@ -63,6 +67,7 @@ class Harness : public ::testing::Test {
         ui::drawPicker(session);
         ui::drawDialogs(session);
         ui::drawShortcuts(session);
+        ui::drawTour(session);
         ui::handleShortcuts(session);
         ImGui::Render();
         session.problems();
@@ -96,12 +101,115 @@ class Harness : public ::testing::Test {
         return core::resolve(session.workspace, ref);
     }
     bool variablesPanel = false;
+    bool palettePanel = false; // the palette where the inspector is
+
+    // Like hover, for an item whose id needs the window's (a pushed id, a child): `id` makes it from the window's id.
+    bool hoverId(const char *window, const std::function<ImGuiID(ImGuiID)> &id, float x) {
+        ImGuiWindow *found = nullptr;
+        for (auto *w : GImGui->Windows)
+            if (std::string(w->Name).find(window) != std::string::npos)
+                found = w;
+        if (!found)
+            return false;
+        const ImGuiID target = id(found->ID);
+        for (float y = found->Pos.y; y < found->Pos.y + found->Size.y; y += 3) {
+            ImGui::GetIO().AddMousePosEvent(found->Pos.x + x, y);
+            frame();
+            if (GImGui->HoveredId == target)
+                return true;
+        }
+        return false;
+    }
+    // Whether a window with that in its name was drawn last frame.
+    bool shown(const char *window) {
+        for (auto *w : GImGui->Windows)
+            if (w->WasActive && std::string(w->Name).find(window) != std::string::npos)
+                return true;
+        return false;
+    }
+    void clickAt(ImVec2 at) {
+        ImGui::GetIO().AddMousePosEvent(at.x, at.y);
+        frame();
+        click();
+    }
+    void doubleClickAt(ImVec2 at) {
+        clickAt(at);
+        click();
+    }
+
+    // A card's box on the canvas (screen coordinates), found by clicking across the canvas until the cursor lands on
+    // it. The view is put back after each click (a click can open a call or unlock a band), and no two clicks make a
+    // double-click.
+    bool findCard(const ui::CardKey &key, ImVec2 &lo, ImVec2 &hi) {
+        auto &io = ImGui::GetIO();
+        const float doubleClick = io.MouseDoubleClickTime;
+        io.MouseDoubleClickTime = 0;
+        const auto saved = session.view(session.active);
+        const auto lands = [&](float x, float y) {
+            session.cursor = {{session.active, {}}, {}}; // a click on empty canvas leaves it there
+            io.AddMousePosEvent(x, y);
+            io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+            frame();
+            io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+            frame();
+            auto &view = session.view(session.active);
+            view.opened = saved.opened;
+            view.openedInside = saved.openedInside;
+            view.unlocked = saved.unlocked;
+            view.pan = saved.pan;
+            view.zoom = saved.zoom;
+            return session.cursor == key;
+        };
+        bool found = false;
+        for (float y = 60; y < 990 && !found; y += 12)
+            for (float x = 10; x < 1090 && !found; x += 30)
+                if (lands(x, y)) {
+                    lo = hi = {x, y};
+                    found = true;
+                }
+        if (found) {
+            while (lo.x > 0 && lands(lo.x - 2, lo.y))
+                lo.x -= 2;
+            while (hi.x < 1100 && lands(hi.x + 2, hi.y))
+                hi.x += 2;
+            const float mid = (lo.x + hi.x) / 2;
+            lo.x = hi.x = mid;
+            while (lo.y > 0 && lands(mid, lo.y - 2))
+                lo.y -= 2;
+            while (hi.y < 1000 && lands(mid, hi.y + 2))
+                hi.y += 2;
+            float left = mid, right = mid;
+            while (left > 0 && lands(left - 2, (lo.y + hi.y) / 2))
+                left -= 2;
+            while (right < 1100 && lands(right + 2, (lo.y + hi.y) / 2))
+                right += 2;
+            lo.x = left;
+            hi.x = right;
+        }
+        io.MouseDoubleClickTime = doubleClick;
+        frames(int(doubleClick / io.DeltaTime) + 2); // the last probe can't pair with the next click
+        return found;
+    }
+    // Drags from where the mouse is to `to` with the left button, in steps.
+    void dragTo(ImVec2 to) {
+        auto &io = ImGui::GetIO();
+        const ImVec2 from = io.MousePos;
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        frame();
+        for (int i = 1; i <= 12; ++i) {
+            io.AddMousePosEvent(from.x + (to.x - from.x) * float(i) / 12, from.y + (to.y - from.y) * float(i) / 12);
+            frame();
+        }
+        frames(2);
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        frames(3);
+    }
 
     // Moves the mouse down a column of the window that holds `label` until that item is under it; false if none is.
     bool hover(const char *window, const char *label, float x) {
         ImGuiWindow *found = nullptr;
         for (auto *w : GImGui->Windows)
-            if (std::string(w->Name).find(window) != std::string::npos)
+            if (std::string(w->Name).find(window) != std::string::npos && (!found || std::string(found->Name) != window))
                 found = w;
         if (!found)
             return false;
@@ -300,7 +408,7 @@ TEST_F(Harness, SubtreesOpenInsideOpenedSubtrees) {
     press(ImGuiKey_Space);
     press(ImGuiKey_DownArrow);
     EXPECT_EQ(cursorId(), "Sequence");
-    EXPECT_TRUE(session.cursor.readOnly());
+    EXPECT_TRUE(session.readOnly(session.cursor));
     press(ImGuiKey_DownArrow);
     press(ImGuiKey_RightArrow);
     press(ImGuiKey_RightArrow);
@@ -561,4 +669,335 @@ TEST_F(Harness, DownReturnsToTheChildYouCameUpFrom) {
     ASSERT_EQ(cursorId(), "Sequence");
     press(ImGuiKey_DownArrow);
     EXPECT_EQ(cursorId(), "Info");
+}
+
+// Backspace deletes on the canvas as Delete does, and stays Backspace in a text field.
+TEST_F(Harness, BackspaceDeletesNodesButNotSearchText) {
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_DownArrow);
+    ASSERT_EQ(cursorId(), "SetBlackboardV3");
+    const auto sequence = core::NodeRef{"Toy.xml", {0}};
+    const auto before = core::nodeChildren(*at(sequence)).size();
+    press(ImGuiKey_Backspace);
+    EXPECT_EQ(core::nodeChildren(*at(sequence)).size(), before - 1);
+    press(ImGuiKey_F, ImGuiMod_Ctrl);
+    type("Info");
+    press(ImGuiKey_Backspace);
+    EXPECT_EQ(session.search, "Inf");
+    EXPECT_EQ(core::nodeChildren(*at(sequence)).size(), before - 1);
+}
+
+// Ctrl+F while the search bar is open but the canvas has the keys: typing goes straight back into the search.
+TEST_F(Harness, CtrlFAgainRefocusesTheSearch) {
+    press(ImGuiKey_F, ImGuiMod_Ctrl);
+    type("Info");
+    clickAt({50, 950});
+    EXPECT_FALSE(ImGui::GetIO().WantTextInput);
+    press(ImGuiKey_F, ImGuiMod_Ctrl);
+    frames(2);
+    EXPECT_TRUE(ImGui::GetIO().WantTextInput);
+    type("Wait");
+    EXPECT_EQ(session.search, "Wait"); // the old query was selected, so typing replaced it
+}
+
+// A subtree opened in place is locked; Ctrl+U unlocks it, edits there go to its own file, and the cursor stays in
+// place. Locking again stops them.
+TEST_F(Harness, UnlockedSubtreeEditsInPlace) {
+    session.setCursor(core::NodeRef{"Toy.xml", {0, 3}}); // SubTree Move
+    frames(2);
+    press(ImGuiKey_Space);
+    press(ImGuiKey_DownArrow);
+    ASSERT_EQ(cursorId(), "Sequence");
+    EXPECT_TRUE(session.readOnly(session.cursor));
+    const auto moveBody = core::NodeRef{"Move", {0}};
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_Delete);
+    EXPECT_EQ(core::nodeChildren(*at(moveBody)).size(), 4u); // locked: nothing happens
+
+    press(ImGuiKey_U, ImGuiMod_Ctrl);
+    EXPECT_FALSE(session.readOnly(session.cursor));
+    EXPECT_TRUE(session.unlocked("Move"));
+    ASSERT_EQ(cursorId(), "GetOdometry");
+    press(ImGuiKey_Delete);
+    EXPECT_EQ(core::nodeChildren(*at(moveBody)).size(), 3u);
+    EXPECT_TRUE(session.workspace.tree("Move")->document->dirty());
+    EXPECT_FALSE(session.workspace.tree("Toy.xml")->document->dirty());
+    EXPECT_TRUE(session.cursor.inside());
+
+    // A node added there lands in Move, and the cursor follows it under the same call.
+    press(ImGuiKey_Tab, ImGuiMod_Shift);
+    type("AlwaysSuccess");
+    press(ImGuiKey_Enter);
+    EXPECT_EQ(cursorId(), "AlwaysSuccess");
+    EXPECT_EQ(session.cursor.ref.tree, "Move");
+    EXPECT_EQ(session.cursor.origin, (core::NodeRef{"Toy.xml", {0, 3}}));
+    EXPECT_EQ(core::nodeChildren(*at(moveBody)).size(), 4u);
+
+    press(ImGuiKey_Z, ImGuiMod_Ctrl);
+    press(ImGuiKey_Z, ImGuiMod_Ctrl);
+    EXPECT_EQ(core::nodeChildren(*at(moveBody)).size(), 4u);
+    EXPECT_EQ(core::nodeId(*core::nodeChildren(*at(moveBody)).front()), "GetOdometry");
+
+    press(ImGuiKey_U, ImGuiMod_Ctrl);
+    EXPECT_TRUE(session.readOnly(session.cursor));
+    // Locks are per view: the subtree's own tab never was.
+    session.openTree("Move");
+    EXPECT_FALSE(session.unlocked("Move"));
+}
+
+// Locking a subtree locks the ones under it, however deep, and leaves the ones above it alone.
+TEST_F(Harness, LockingReachesTheSubtreesUnderIt) {
+    session.toggleLock("Move");
+    session.toggleLock("Settle"); // called by Move
+    session.toggleLock("Settle");
+    EXPECT_TRUE(session.unlocked("Move"));
+    EXPECT_FALSE(session.unlocked("Settle"));
+
+    session.toggleLock("Settle");
+    session.toggleLock("Move");
+    EXPECT_FALSE(session.unlocked("Move"));
+    EXPECT_FALSE(session.unlocked("Settle"));
+}
+
+// Closing an opened subtree locks it and what is under it, even when it was the one still locked.
+TEST_F(Harness, ClosingASubtreeLocksIt) {
+    session.setCursor(core::NodeRef{"Toy.xml", {0, 3}}); // SubTree Move
+    frames(2);
+    press(ImGuiKey_Space);
+    session.toggleLock("Move");
+    session.toggleLock("Settle");
+    press(ImGuiKey_Space);
+    EXPECT_FALSE(session.unlocked("Move"));
+    EXPECT_FALSE(session.unlocked("Settle"));
+
+    press(ImGuiKey_Space);
+    EXPECT_FALSE(session.unlocked("Move")); // and it opens locked
+    session.toggleLock("Settle");
+    press(ImGuiKey_Space);
+    EXPECT_FALSE(session.unlocked("Settle"));
+}
+
+// The box of an opened subtree's globals has fields only while the subtree is unlocked; there it adds and removes.
+TEST_F(Harness, GlobalsBoxEditsOnlyWhenUnlocked) {
+    session.setCursor(core::NodeRef{"Toy.xml", {0, 3}});
+    frames(2);
+    press(ImGuiKey_Space);
+    press(ImGuiKey_DownArrow);
+    EXPECT_FALSE(hover("##globals_box", "##newname", 20)); // locked: shown, no fields
+    press(ImGuiKey_U, ImGuiMod_Ctrl);
+    frames(3); // the layout makes room for the fields, and the view settles
+    ASSERT_TRUE(hover("##globals_box", "##newname", 20));
+    click();
+    type("gain");
+    press(ImGuiKey_Enter);
+    EXPECT_EQ(core::readGlobals(*session.workspace.tree("Move")->tree).globals,
+              (std::vector<core::Global>{{"gain", ""}}));
+    frames(2);
+    ASSERT_TRUE(hoverId(
+        "##globals_box", [](ImGuiID box) { return ImHashStr("x", 0, ImHashStr("gain", 0, box)); }, 305));
+    click();
+    EXPECT_TRUE(core::readGlobals(*session.workspace.tree("Move")->tree).globals.empty());
+}
+
+// The padlock on a call's corner is there only while it is open; a click there locks and unlocks it.
+TEST_F(Harness, PadlockOnAnOpenedCall) {
+    session.setCursor(core::NodeRef{"Toy.xml", {0, 3}}); // SubTree Move
+    frames(2);
+    const auto call = session.cursor;
+    ImVec2 lo, hi;
+    ASSERT_TRUE(findCard(call, lo, hi));
+    clickAt({hi.x, lo.y});
+    EXPECT_FALSE(session.unlocked("Move")); // closed: no padlock
+
+    session.setCursor(call);
+    press(ImGuiKey_Space);
+    frames(3);
+    ASSERT_TRUE(findCard(call, lo, hi));
+    clickAt({hi.x, lo.y});
+    EXPECT_TRUE(session.unlocked("Move"));
+    clickAt({hi.x, lo.y});
+    EXPECT_FALSE(session.unlocked("Move"));
+}
+
+// The count above a call: the trees that call it, each once.
+TEST_F(Harness, TreesUsingCountsCallers) {
+    EXPECT_EQ(session.treesUsing("Move"), 1);   // Toy, twice
+    EXPECT_EQ(session.treesUsing("Settle"), 2); // Toy and Move
+    EXPECT_EQ(session.treesUsing("Nothing"), 0);
+}
+
+// A port edited on its card: Enter keeps it, Esc drops it, and Backspace there edits text instead of deleting.
+TEST_F(Harness, PortEditsOnItsCard) {
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_DownArrow);
+    ASSERT_EQ(cursorId(), "SetBlackboardV3");
+    const auto setter = session.cursor.ref;
+    session.inlineEdit = {session.cursor, "value", true, {}};
+    frames(3);
+    EXPECT_TRUE(ImGui::GetIO().WantTextInput);
+    press(ImGuiKey_A, ImGuiMod_Ctrl);
+    type("2.5x");
+    press(ImGuiKey_Backspace);
+    press(ImGuiKey_Enter);
+    EXPECT_EQ(at(setter)->get("value"), "2.5");
+    EXPECT_TRUE(session.inlineEdit.port.empty());
+    EXPECT_EQ(cursorId(), "SetBlackboardV3");
+
+    session.inlineEdit = {session.cursor, "value", true, {}};
+    frames(3);
+    type("9");
+    press(ImGuiKey_Escape);
+    EXPECT_EQ(at(setter)->get("value"), "2.5");
+    EXPECT_TRUE(session.inlineEdit.port.empty());
+}
+
+// Double-clicking a port row edits it on the card; double-clicking a call's title still opens its tree.
+TEST_F(Harness, DoubleClickARowEditsItAndACallTitleOpensIt) {
+    const ui::CardKey setter{{"Toy.xml", {0, 1}}, {}};
+    ImVec2 lo, hi;
+    ASSERT_TRUE(findCard(setter, lo, hi));
+    doubleClickAt({(lo.x + hi.x) / 2, hi.y - 12}); // the last row: value
+    EXPECT_EQ(session.inlineEdit.port, "value");
+    press(ImGuiKey_Escape);
+
+    const ui::CardKey call{{"Toy.xml", {0, 3}}, {}};
+    ASSERT_TRUE(findCard(call, lo, hi));
+    doubleClickAt({(lo.x + hi.x) / 2, lo.y + 6});
+    EXPECT_EQ(session.active, "Move");
+}
+
+// Double-clicking a node in a locked subtree opens that subtree's tab with the cursor on that node.
+TEST_F(Harness, DoubleClickInsideASubtreeOpensItOnThatNode) {
+    const ui::CardKey call{{"Toy.xml", {0, 3}}, {}};
+    session.setCursor(call);
+    frames(2);
+    press(ImGuiKey_Space);
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_DownArrow);
+    ASSERT_EQ(cursorId(), "GetOdometry");
+    const auto node = session.cursor;
+    ImVec2 lo, hi;
+    ASSERT_TRUE(findCard(node, lo, hi));
+    doubleClickAt({(lo.x + hi.x) / 2, lo.y + 6});
+    frames(5);
+    EXPECT_EQ(session.active, "Move");
+    EXPECT_EQ(session.cursor.ref, node.ref);
+    EXPECT_FALSE(session.cursor.inside());
+}
+
+// Double-clicking a node's title names it on the card, and the field grows with the text. Clearing it takes the
+// attribute away. A call's title still opens its tree (above).
+TEST_F(Harness, DoubleClickATitleNamesTheNode) {
+    const ui::CardKey setter{{"Toy.xml", {0, 1}}, {}};
+    ImVec2 lo, hi;
+    ASSERT_TRUE(findCard(setter, lo, hi));
+    doubleClickAt({(lo.x + hi.x) / 2, lo.y + 6});
+    EXPECT_EQ(session.inlineEdit.port, "name");
+    frames(3);
+    const auto field = [] {
+        for (auto *w : GImGui->Windows)
+            if (w->WasActive && std::string(w->Name).find("##inline_edit") != std::string::npos)
+                return w;
+        return static_cast<ImGuiWindow *>(nullptr);
+    };
+    ASSERT_NE(field(), nullptr);
+    const float left = field()->Pos.x, width = field()->Size.x;
+    type("a name long enough to outgrow the node it sits on");
+    frames(3);
+    EXPECT_EQ(session.inlineEdit.text, "a name long enough to outgrow the node it sits on");
+    EXPECT_NEAR(field()->Pos.x, left, 1); // the card stays put while it grows
+    EXPECT_GT(field()->Size.x, width);
+    press(ImGuiKey_Enter);
+    EXPECT_EQ(at(setter.ref)->get("name"), "a name long enough to outgrow the node it sits on");
+    EXPECT_TRUE(session.inlineEdit.port.empty());
+
+    session.inlineEdit = {setter, "name", true, {}};
+    frames(3);
+    press(ImGuiKey_A, ImGuiMod_Ctrl);
+    press(ImGuiKey_Backspace);
+    press(ImGuiKey_Enter);
+    EXPECT_FALSE(at(setter.ref)->has("name"));
+}
+
+// A palette node let go on empty canvas is not added, and the status says why; on a node's middle it goes inside.
+TEST_F(Harness, PaletteDropsExplainWhereTheyCantGo) {
+    const ui::CardKey fallback{{"Toy.xml", {0, 4}}, {}};
+    ImVec2 lo, hi;
+    ASSERT_TRUE(findCard(fallback, lo, hi));
+    palettePanel = true;
+    frames(2);
+    ASSERT_TRUE(hover("Palette", "##palette", 40));
+    click();
+    type("AlwaysSuccess");
+    const auto item = [](ImGuiID list) { return ImHashStr("AlwaysSuccess", 0, ImHashStr("AlwaysSuccess", 0, list)); };
+    ASSERT_TRUE(hoverId("##palette_list", item, 60));
+    dragTo({50, 950});
+    EXPECT_NE(session.statusText.find("Not added"), std::string::npos) << session.statusText;
+    EXPECT_FALSE(session.workspace.tree("Toy.xml")->document->dirty());
+
+    ASSERT_TRUE(hoverId("##palette_list", item, 60));
+    dragTo({(lo.x + hi.x) / 2, (lo.y + hi.y) / 2});
+    const auto children = core::nodeChildren(*at(fallback.ref));
+    ASSERT_EQ(children.size(), 3u);
+    EXPECT_EQ(core::nodeId(*children.back()), "AlwaysSuccess");
+}
+
+// A touchpad pinch zooms by steps at the pointer.
+TEST_F(Harness, PinchZooms) {
+    ImGui::GetIO().AddMousePosEvent(550, 500);
+    frames(2);
+    const float before = session.view(session.active).zoom;
+    session.pinch = {true, 1.f};
+    frame();
+    session.pinch.scale = 1.2f;
+    frame();
+    session.pinch.scale = 1.42f;
+    frame();
+    session.pinch = {};
+    frame();
+    EXPECT_FLOAT_EQ(session.view(session.active).zoom, ui::stepZoom(ui::stepZoom(before, 1), 1));
+}
+
+
+// The tour opens from Help, pages with the arrows and its buttons, and closes on Esc, remembering it was seen.
+TEST_F(Harness, TourPagesAndCloses) {
+    int seen = 0;
+    session.tourDone = [&] { ++seen; };
+    session.run("help.tour");
+    frames(3);
+    EXPECT_TRUE(shown("###tour"));
+    press(ImGuiKey_RightArrow);
+    press(ImGuiKey_RightArrow);
+    EXPECT_EQ(session.tourPage, 2);
+    press(ImGuiKey_LeftArrow);
+    EXPECT_EQ(session.tourPage, 1);
+    ASSERT_TRUE(hover("Getting started###tour", "Next", 700));
+    click();
+    EXPECT_EQ(session.tourPage, 2);
+    // The canvas keys don't reach the tree behind it.
+    const auto cursor = session.cursor;
+    press(ImGuiKey_DownArrow);
+    EXPECT_EQ(session.cursor, cursor);
+    press(ImGuiKey_Escape);
+    EXPECT_FALSE(session.showTour);
+    EXPECT_EQ(seen, 1);
+    frames(2);
+    EXPECT_FALSE(shown("###tour"));
+}
+
+// Closing a subtree opened in place drops what was selected in it: nothing out of sight gets edited.
+TEST_F(Harness, ClosingASubtreeDropsItsSelection) {
+    session.setCursor(core::NodeRef{"Toy.xml", {0, 3}});
+    frames(2);
+    press(ImGuiKey_Space);
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_U, ImGuiMod_Ctrl);
+    press(ImGuiKey_DownArrow);
+    press(ImGuiKey_Space, ImGuiMod_Ctrl);
+    ASSERT_EQ(session.selection.size(), 1u);
+    press(ImGuiKey_UpArrow);
+    press(ImGuiKey_UpArrow);
+    ASSERT_EQ(session.cursor.ref, (core::NodeRef{"Toy.xml", {0, 3}}));
+    press(ImGuiKey_Space);
+    EXPECT_TRUE(session.selection.empty());
 }

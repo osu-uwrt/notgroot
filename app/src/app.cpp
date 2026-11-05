@@ -93,6 +93,11 @@ App::App(Options options) : opt_(std::move(options)) {
         openWorkspace(opt_.open);
     else if (!recent_.empty())
         openWorkspace(recent_.front());
+
+    // The getting-started tour on the first start (never in a --no-persist run: screenshots stay as asked).
+    session_.tourDone = [this] { savePreference("tour_seen", "yes"); };
+    if (!config_.empty() && preference("tour_seen").empty())
+        session_.showTour = true;
 }
 
 void App::openWorkspace(const fs::path &path) {
@@ -285,6 +290,7 @@ int App::run() {
         if (!opt_.keys.empty() || !opt_.text.empty())
             replay();
         window_->beginFrame();
+        session_.pinch = {window_->pinch().active(), window_->pinch().scale()};
         frame();
         ++frameCount_;
         const bool last = opt_.frames > 0 && frameCount_ >= opt_.frames;
@@ -405,6 +411,7 @@ void App::frame() {
     ui::drawPicker(session_);
     ui::drawDialogs(session_);
     ui::drawShortcuts(session_);
+    ui::drawTour(session_);
     aboutWindow();
     ui::handleShortcuts(session_);
     updateTitle();
@@ -500,7 +507,7 @@ void App::menuBar() {
     }
     const auto commands = [&](const char *group) {
         for (const auto &command : session_.commands)
-            if (command.group == group && command.id != "edit.redo2" &&
+            if (command.group == group && !ui::Session::alias(command) &&
                 ImGui::MenuItem(command.label.c_str(), ui::chordName(command.chord).c_str(), false,
                                 !command.enabled || command.enabled()))
                 command.run();

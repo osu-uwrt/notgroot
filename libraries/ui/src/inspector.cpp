@@ -63,16 +63,9 @@ int completeCallback(ImGuiInputTextCallbackData *data) {
     return 0;
 }
 
-// The editable value of one attribute. Commits on Enter or when the field loses focus; Esc returns to the canvas.
+// The editable value of one attribute: the {} toggle, then the field. Enter or Esc returns to the canvas.
 void valueField(Session &session, const NodeRef &ref, const std::string &name, const std::string &value,
                 const std::vector<std::string> &keys, bool focus, bool toggle = true) {
-    static std::map<std::string, std::string> buffers;
-    const std::string id = "##value_" + name;
-    const ImGuiID field = ImGui::GetID(id.c_str());
-    auto &buffer = buffers[name];
-    if (ImGui::GetActiveID() != field)
-        buffer = value;
-
     // {} toggles between text and a key.
     const bool key = toggle && isKeyReference(value);
     if (toggle) {
@@ -90,12 +83,29 @@ void valueField(Session &session, const NodeRef &ref, const std::string &name, c
             ImGui::SetTooltip(key ? "A blackboard key: click for text" : "Text: click to make it a blackboard key");
         ImGui::SameLine();
     }
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    const auto end = portValueField(session, ref, name, value, keys, focus);
+    if (end == FieldEnd::Entered || end == FieldEnd::Canceled)
+        session.focusCanvas = true;
+}
+
+} // namespace
+
+FieldEnd portValueField(Session &session, const NodeRef &ref, const std::string &name, const std::string &value,
+                        const std::vector<std::string> &keys, bool focus, std::string *live) {
+    // A buffer per field: the inspector and a card can show the same port.
+    static std::map<ImGuiID, std::string> buffers;
+    const std::string id = "##value_" + name;
+    const ImGuiID field = ImGui::GetID(id.c_str());
+    auto &buffer = buffers[field];
+    if (ImGui::GetActiveID() != field)
+        buffer = value;
 
     if (focus)
         ImGui::SetKeyboardFocusHere();
-    ImGui::SetNextItemWidth(-FLT_MIN);
+    const bool key = isKeyReference(buffer);
     if (key)
-        ImGui::PushStyleColor(ImGuiCol_Text, session.keyColor(ref.tree, keyOf(value)));
+        ImGui::PushStyleColor(ImGuiCol_Text, session.keyColor(ref.tree, keyOf(buffer)));
     ImGuiInputTextFlags flags =
         ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackAlways | ImGuiInputTextFlags_CallbackHistory;
     const bool showing = completion.field == field && !completion.options.empty();
@@ -105,6 +115,8 @@ void valueField(Session &session, const NodeRef &ref, const std::string &name, c
         inputString(id.c_str(), buffer, flags, completeCallback, const_cast<std::vector<std::string> *>(&keys));
     if (key)
         ImGui::PopStyleColor();
+    if (live)
+        *live = buffer;
     const bool active = ImGui::IsItemActive();
     if (active)
         completion.field = field;
@@ -117,14 +129,16 @@ void valueField(Session &session, const NodeRef &ref, const std::string &name, c
             ImGui::ActivateItemByID(field);
         }
     }
+    auto end = FieldEnd::Editing;
     if (enter || ImGui::IsItemDeactivatedAfterEdit()) {
-        if (buffer != value || (!value.empty() && buffer.empty()))
+        if (name == "name" && buffer.empty()) // no name is no attribute, not an empty one
+            session.edited(session.editor.removeAttribute(ref, name));
+        else if (buffer != value || (!value.empty() && buffer.empty()))
             session.edited(session.editor.setAttribute(ref, name, buffer));
-        if (enter)
-            session.focusCanvas = true;
+        end = enter ? FieldEnd::Entered : FieldEnd::Left;
     }
-    if (ImGui::IsItemDeactivated() && ImGui::IsKeyPressed(ImGuiKey_Escape))
-        session.focusCanvas = true;
+    if (ImGui::IsItemDeactivated() && !enter)
+        end = ImGui::IsKeyPressed(ImGuiKey_Escape) ? FieldEnd::Canceled : FieldEnd::Left;
 
     // The suggestions under the field.
     if (active && completion.field == field && !completion.options.empty()) {
@@ -138,22 +152,24 @@ void valueField(Session &session, const NodeRef &ref, const std::string &name, c
         for (std::size_t i = 0; i < completion.options.size(); ++i) {
             const auto &option = completion.options[i];
             const bool on = int(i) == completion.selected;
-            ImGui::TextColored(on ? palette().accent : session.keyColor(session.active, option), "%s{%s}",
+            ImGui::TextColored(on ? palette().accent : session.keyColor(ref.tree, option), "%s{%s}",
                                on ? "› " : "  ", option.c_str());
         }
         ImGui::TextDisabled("Tab or Enter takes it, ↑↓ choose");
         ImGui::End();
     } else if (completion.field == field && !active)
         completion.options.clear();
+    return end;
 }
 
-// Keys a value can name in this tree: its keys and its ports.
 std::vector<std::string> keysIn(Session &session, const std::string &tree) {
     std::vector<std::string> keys;
     for (const auto &[name, info] : session.variables(tree).keys)
         keys.push_back(name);
     return keys;
 }
+
+namespace {
 
 void treeInspector(Session &session, const std::string &key) {
     const auto *entry = session.workspace.tree(key);
@@ -232,7 +248,7 @@ void drawInspector(Session &session) {
         session.focusInspector = false;
         return;
     }
-    const bool readOnly = cursor.readOnly();
+    const bool readOnly = session.readOnly(cursor);
     const bool call = isSubTree(*element);
     const auto id = call ? element->get("ID") : nodeId(*element);
     const auto category = nodeCategory(*element, session.workspace.catalog());
@@ -245,22 +261,33 @@ void drawInspector(Session &session) {
     ImGui::PopFont();
     ImGui::TextDisabled("%s%s%s", call ? "SubTree call" : categoryName(category),
                         known && model.builtin ? " · builtin" : "",
-                        readOnly ? (" · in " + cursor.ref.tree + ", read-only here").c_str() : "");
+                        readOnly        ? (" · in " + cursor.ref.tree + ", locked here").c_str()
+                        : cursor.inside() ? (" · in " + cursor.ref.tree + ", editing its file").c_str()
+                                          : "");
     if (known && !model.description.empty())
         ImGui::TextWrapped("%s", model.description.c_str());
+    // The next small button: beside the last one, or under it where it wouldn't fit.
+    const auto nextButton = [](const char *label) {
+        ImGui::SameLine();
+        if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(label).x + 2 * ImGui::GetStyle().FramePadding.x)
+            ImGui::NewLine();
+        return ImGui::SmallButton(label);
+    };
     if (!readOnly) {
         if (ImGui::SmallButton("Change type… (Ctrl+R)"))
             session.pick(PickFor::Retype);
         if (call) {
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Open definition (Ctrl+Enter)"))
+            if (nextButton("Open definition (Ctrl+Enter)"))
                 session.run("node.definition");
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Edit ports…"))
+            if (nextButton("Edit ports…"))
                 session.ask(Session::Dialog::EditPorts, id);
         }
-    } else if (ImGui::SmallButton("Open its tree to edit (Ctrl+Enter)"))
-        session.run("node.definition");
+    } else {
+        if (ImGui::SmallButton("Unlock to edit here (Ctrl+U)"))
+            session.run("tree.lock");
+        if (nextButton("Open its tree (Ctrl+Enter)"))
+            session.run("node.definition");
+    }
 
     ImGui::BeginDisabled(readOnly);
     const auto keys = keysIn(session, cursor.ref.tree);

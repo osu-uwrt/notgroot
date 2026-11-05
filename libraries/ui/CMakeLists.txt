@@ -7,7 +7,8 @@ add_library(notgroot_ui
   src/canvas.cpp
   src/inspector.cpp
   src/panels.cpp
-  src/popups.cpp)
+  src/popups.cpp
+  src/tour.cpp)
 target_include_directories(notgroot_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(notgroot_ui PUBLIC notgroot_core notgroot_imgui PRIVATE yaml-cpp)
 notgroot_project_options(notgroot_ui)

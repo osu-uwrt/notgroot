@@ -143,8 +143,10 @@ void drawPalette(Session &session) {
     });
 
     const auto add = [&](const NodeModel &model) {
-        if (session.cursor.readOnly() || session.cursor.ref.empty()) {
-            session.status("Put the cursor on a node in the open tree first", true);
+        if (session.readOnly(session.cursor) || session.cursor.ref.empty()) {
+            session.status(session.cursor.ref.empty() ? "Put the cursor on a node in the open tree first"
+                                                      : "That node is in a locked subtree: unlock it first (Ctrl+U)",
+                           true);
             return;
         }
         auto *element = resolve(session.workspace, session.cursor.ref);
@@ -168,8 +170,13 @@ void drawPalette(Session &session) {
             ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             add(model);
         if (ImGui::BeginDragDropSource()) {
+            // A small card of the node, and where it can go.
             ImGui::SetDragDropPayload("NOTGROOT_MODEL", model.id.data(), model.id.size());
-            ImGui::Text("%s", model.id.c_str());
+            chip(categoryColor(model.category), ui(4));
+            ImGui::PushFont(typeRamp().strong);
+            ImGui::TextUnformatted(model.id.c_str());
+            ImGui::PopFont();
+            ImGui::TextDisabled("Drop on a node in the tree: its middle adds a child, its ends a sibling");
             ImGui::EndDragDropSource();
         }
         if (ImGui::BeginItemTooltip()) {
@@ -245,7 +252,84 @@ bool keyField(const char *id, const char *hint, std::string &text, const std::ve
     }
     return done;
 }
+
+std::vector<Global> globalsOf(Session &session, const std::string &tree) {
+    const auto *entry = session.workspace.tree(tree);
+    return entry ? readGlobals(*entry->tree).globals : std::vector<Global>{};
+}
 } // namespace
+
+bool applyGlobals(Session &session, const std::string &tree, const std::vector<Global> &list, const std::string &what) {
+    session.globalCycle.clear();
+    if (session.editor.setGlobals(tree, list)) {
+        session.status(what);
+        return true;
+    }
+    for (const auto &cycle : session.editor.cycles())
+        session.globalCycle.insert(session.globalCycle.end(), cycle.begin(), cycle.end());
+    session.status(session.editor.error(), true);
+    return false;
+}
+
+std::vector<std::string> globalNames(Session &session, const std::string &tree) {
+    std::vector<std::string> usable;
+    for (const auto &[name, key] : session.variables(tree).keys)
+        if (key.scope != Scope::Local)
+            usable.push_back(name);
+    return usable;
+}
+
+void globalValueField(Session &session, const std::string &tree, const std::string &name, const std::string &value,
+                      const std::vector<std::string> &usable) {
+    // The value: text, with {key} for another global or an input (they are joined in). A buffer per field: the
+    // panel and the boxes on the canvas can show the same global.
+    static std::map<ImGuiID, std::string> editing;
+    auto &text = editing.try_emplace(ImGui::GetID("##value"), value).first->second;
+    keyField("##value", "text, {key}…", text, usable);
+    if (ImGui::IsItemDeactivatedAfterEdit() && text != value) {
+        auto list = globalsOf(session, tree);
+        for (auto &global : list)
+            if (global.name == name)
+                global.value = text;
+        applyGlobals(session, tree, list, "Set " + name);
+    }
+    if (!ImGui::IsItemActive())
+        text = value;
+}
+
+void removeGlobalButton(Session &session, const std::string &tree, const std::string &name) {
+    if (ImGui::SmallButton("x")) {
+        auto list = globalsOf(session, tree);
+        list.erase(std::remove_if(list.begin(), list.end(), [&](auto &g) { return g.name == name; }), list.end());
+        applyGlobals(session, tree, list, "Removed global " + name);
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Remove the global");
+}
+
+void newGlobalFields(Session &session, const std::string &tree, const std::vector<std::string> &usable,
+                     float nameWidth) {
+    static std::map<std::string, std::pair<std::string, std::string>> drafts; // name and value, per tree
+    auto &[name, value] = drafts[tree];
+    ImGui::SetNextItemWidth(nameWidth);
+    bool add = inputStringWithHint("##newname", "new global", name, ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - ImGui::GetStyle().ItemSpacing.x);
+    add |= keyField("##newvalue", "value, {key}…", value, usable, ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine();
+    add |= ImGui::Button("+", {ImGui::GetFrameHeight(), 0});
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Add the global");
+    if (add && !name.empty()) {
+        auto list = globalsOf(session, tree);
+        list.push_back({name, value});
+        if (applyGlobals(session, tree, list, "New global " + name)) {
+            session.highlightKey = name;
+            name.clear();
+            value.clear();
+        }
+    }
+}
 
 void drawVariables(Session &session) {
     if (session.active.empty()) {
@@ -337,24 +421,7 @@ void drawVariables(Session &session) {
 
     // Globals: set before the tree runs, in the order their values need. No nodes: one Script the editor keeps.
     if (header("Globals", globals.size())) {
-        const auto all = readGlobals(*entry->tree).globals;
-        // What a global's value can name: the inputs and the other globals (locals don't exist yet).
-        std::vector<std::string> usable;
-        for (const auto &[name, key] : variables.keys)
-            if (key.scope != Scope::Local)
-                usable.push_back(name);
-        const auto apply = [&](const std::vector<Global> &list, const std::string &what) {
-            if (session.editor.setGlobals(session.active, list)) {
-                session.globalCycle.clear();
-                session.status(what);
-                return true;
-            }
-            session.globalCycle.clear();
-            for (const auto &cycle : session.editor.cycles())
-                session.globalCycle.insert(session.globalCycle.end(), cycle.begin(), cycle.end());
-            session.status(session.editor.error(), true);
-            return false;
-        };
+        const auto usable = globalNames(session, session.active);
         if (!globals.empty() && ImGui::BeginTable("##globals", 3, flags)) {
             ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthStretch, 1);
             ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 1.6f);
@@ -366,55 +433,17 @@ void drawVariables(Session &session) {
                 ImGui::TableNextColumn();
                 keyCell(*key);
                 ImGui::TableNextColumn();
-                // The value: text, with {key} for another global or an input (they are joined in).
-                static std::map<std::string, std::string> editing;
-                auto &value = editing.try_emplace(key->name, key->value).first->second;
                 ImGui::SetNextItemWidth(-FLT_MIN);
-                keyField("##value", "text, {key}…", value, usable);
-                if (ImGui::IsItemDeactivatedAfterEdit() && value != key->value) {
-                    auto list = all;
-                    for (auto &global : list)
-                        if (global.name == key->name)
-                            global.value = value;
-                    apply(list, "Set " + key->name);
-                }
-                if (!ImGui::IsItemActive())
-                    value = key->value;
+                globalValueField(session, session.active, key->name, key->value, usable);
                 if (ImGui::IsItemHovered() && key->uses.empty())
                     ImGui::SetTooltip("Not read anywhere yet");
                 ImGui::TableNextColumn();
-                if (ImGui::SmallButton("x")) {
-                    auto list = all;
-                    list.erase(std::remove_if(list.begin(), list.end(), [&](auto &g) { return g.name == key->name; }),
-                               list.end());
-                    apply(list, "Removed global " + key->name);
-                }
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Remove the global");
+                removeGlobalButton(session, session.active, key->name);
                 ImGui::PopID();
             }
             ImGui::EndTable();
         }
-        // A new one.
-        static std::string name, value;
-        ImGui::SetNextItemWidth(ui(130));
-        bool add = inputStringWithHint("##newname", "new global", name, ImGuiInputTextFlags_EnterReturnsTrue);
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - ImGui::GetStyle().ItemSpacing.x);
-        add |= keyField("##newvalue", "value, {key}…", value, usable, ImGuiInputTextFlags_EnterReturnsTrue);
-        ImGui::SameLine();
-        add |= ImGui::Button("+", {ImGui::GetFrameHeight(), 0});
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Add the global");
-        if (add && !name.empty()) {
-            auto list = all;
-            list.push_back({name, value});
-            if (apply(list, "New global " + name)) {
-                session.highlightKey = name;
-                name.clear();
-                value.clear();
-            }
-        }
+        newGlobalFields(session, session.active, usable, ui(130));
     }
 
     // Locals: keys bound while the tree runs (a node's {key}, a setter, a script).

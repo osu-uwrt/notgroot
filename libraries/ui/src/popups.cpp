@@ -177,7 +177,7 @@ void drawFinder(Session &session) {
                                "",
                                {}});
         for (const auto &command : session.commands)
-            if (command.id != "edit.redo2")
+            if (!Session::alias(command))
                 all.push_back({Target::Command,
                                {command.label, command.group, chordName(command.chord), {0, 0, 0, 0}, 0},
                                "",
@@ -668,11 +668,15 @@ const std::vector<std::pair<const char *, const char *>> &canvasKeys() {
         {"Alt+Down", "move the node into the previous sibling"},
         {"Space", "fold / unfold; on a SubTree call, open it in place"},
         {"Esc", "clear the selection and the key highlight"},
-        {"Ctrl+= / Ctrl+-", "zoom in / out (Ctrl+wheel: at the mouse)"},
+        {"Ctrl+= / Ctrl+-", "zoom in / out (Ctrl+wheel or a touchpad pinch: at the mouse)"},
         {"Click", "select; Ctrl+click or Shift+click adds or removes"},
         {"Shift+drag", "select a box (on empty canvas)"},
         {"Drag a node", "move it (and the selection): beside a node, or into it"},
-        {"Double-click", "edit the node; on a call, open its tree"},
+        {"Drag from the palette", "add a node: on a node's middle inside it, on its ends beside it"},
+        {"Double-click a port row", "edit that value on the card (Enter keeps, Esc cancels, Tab next row)"},
+        {"Double-click a title", "name the node on the card; on a call, open its tree"},
+        {"Double-click in a locked subtree", "open that subtree on that node"},
+        {"Click an opened call's padlock", "unlock a subtree opened in place to edit it there, or lock it (Ctrl+U)"},
         {"Drag", "pan (empty canvas; also the middle button)"},
     };
     return keys;
@@ -725,7 +729,7 @@ void drawShortcuts(Session &session) {
     for (const char *group : {"File", "Edit", "Select", "Node", "Tree", "View", "Help"}) {
         rows.clear();
         for (const auto &c : session.commands)
-            if (c.group == group && c.chord && c.id != "edit.redo2" && shown(chordName(c.chord), c.label))
+            if (c.group == group && c.chord && !Session::alias(c) && shown(chordName(c.chord), c.label))
                 rows.push_back({chordName(c.chord), c.label});
         if (rows.empty())
             continue;

@@ -1,7 +1,9 @@
 // GLFW/GLEW/ImGui context of the editor: one window, the theme's fonts. Adapted from Nereus's viewer host window.
 #pragma once
 #include "notgroot/ui/theme.hpp"
+#include "pinch.hpp"
 #include <filesystem>
+#include <memory>
 #include <imgui.h>
 #include <string>
 #include <vector>
@@ -46,11 +48,16 @@ class Window {
     void loadFonts(float ui, const ui::Theme &theme = {}, const std::filesystem::path &fontDirectory = {});
     // The desktop's UI scale for this window (GNOME at 200 %: 2).
     float contentScale() const;
+    // The touchpad pinch going on, read in beginFrame.
+    const Pinch &pinch() const {
+        return *pinch_;
+    }
 
   private:
     bool backendReady_ = false;
     double idleWait_ = 0;
     GLFWwindow *window_ = nullptr;
+    std::unique_ptr<Pinch> pinch_;
 };
 
 // Reads a PNG as RGBA8 rows (top row first); false if it cannot be read.

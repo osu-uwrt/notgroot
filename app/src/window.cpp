@@ -69,6 +69,7 @@ Window::Window(int width, int height, const std::string &titleText, bool hidden)
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 330 core");
     backendReady_ = true;
+    pinch_ = std::make_unique<Pinch>(window_);
 }
 
 float Window::contentScale() const {
@@ -170,6 +171,7 @@ void Window::loadFonts(float ui, const ui::Theme &theme, const std::filesystem::
 }
 
 Window::~Window() {
+    pinch_.reset(); // its watcher posts to GLFW
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
@@ -199,6 +201,7 @@ void Window::beginFrame() {
         glfwWaitEventsTimeout(idleWait_);
     else
         glfwPollEvents();
+    pinch_->poll();
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
