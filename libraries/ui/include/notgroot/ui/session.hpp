@@ -45,6 +45,7 @@ struct ViewState {
     std::set<std::vector<core::NodeRef>> openedInside; // calls inside an opened subtree: the calls leading to them
     std::set<std::string> unlocked;                    // subtrees (by ID) editable where they are opened in place
     bool fit = true;                                   // fit the tree to the view on the next frame
+    core::NodeRef fitOn; // a fit keeps this node in view too, when the tree doesn't fit whole (empty: the root)
     bool fitted = false; // still as fitted (no pan or zoom since): refit when the view resizes
     ImVec2 size{0, 0};   // the canvas size last frame
 };

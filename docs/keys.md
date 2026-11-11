@@ -129,7 +129,8 @@ it and closes the brace.
 
 doTask writes a log of every run to `~/btlogs` (`BTLog_<date>_<time>.btlog`). Open one to see the run on the trees
 as they ran: it opens beside the editor, read-only. The canvas shows one subtree instance at a time, its cards tinted
-with their status at the playhead (amber running, green success, red failure; faded once idle again).
+with their status at the playhead (amber running, green success, red failure; faded once idle again). Showing an
+instance while it runs puts the cursor on its deepest running node, in view; with Follow on, the view keeps up with it.
 
 | Key | Does |
 |---|---|

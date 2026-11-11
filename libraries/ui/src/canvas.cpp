@@ -1489,6 +1489,18 @@ void drawCanvas(Session &session) {
             view.pan.x = size.x / 2 - (root.position.x + root.size.x / 2) * view.zoom;
         if (session.horizontal && current.extent.y * view.zoom > size.y - 2 * margin)
             view.pan.y = size.y / 2 - (root.position.y + root.size.y / 2) * view.zoom;
+        // A node that must show as well (a run's running node): centered on each side it would be off.
+        if (!view.fitOn.empty())
+            for (const auto &card : current.cards)
+                if (card.key.ref == view.fitOn && !card.key.inside()) {
+                    const ImVec2 a{view.pan.x + card.position.x * view.zoom, view.pan.y + card.position.y * view.zoom},
+                        b{a.x + card.size.x * view.zoom, a.y + card.size.y * view.zoom};
+                    if (a.x < margin || b.x > size.x - margin)
+                        view.pan.x = size.x / 2 - (card.position.x + card.size.x / 2) * view.zoom;
+                    if (a.y < margin || b.y > size.y - margin)
+                        view.pan.y = size.y / 2 - (card.position.y + card.size.y / 2) * view.zoom;
+                    break;
+                }
         view.fit = false;
         view.fitted = true;
     }

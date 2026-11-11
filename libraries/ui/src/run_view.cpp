@@ -58,8 +58,16 @@ void moved(Session &session) {
     if (!view.follow)
         return;
     const int deepest = view.run.deepestRunning(view.state);
-    if (deepest >= 0 && deepest != view.frame)
+    if (deepest >= 0 && deepest != view.frame) {
         focusFrame(session, deepest);
+        return;
+    }
+    // In the same frame, the node running now comes into view when it moves (a scroll only as far as needed).
+    const auto running = runningNode(session);
+    if (!running.empty() && running != view.running) {
+        view.running = running;
+        session.setCursor(running);
+    }
 }
 
 // Whether an instance (or one under it) is worth a row under the filter.
@@ -232,6 +240,17 @@ bool cardStatus(const Session &session, const CardKey &key, RunStatus &status, b
     return status != RunStatus::Idle;
 }
 
+NodeRef runningNode(const Session &session) {
+    const auto &view = *session.runView;
+    const auto &instance = instanceAt(view, view.frame);
+    const std::vector<std::size_t> *deepest = nullptr;
+    for (const auto uid : instance.uids)
+        if (uid < view.state.status.size() && view.state.status[uid] == RunStatus::Running)
+            if (const auto *node = view.run.node(uid); node && (!deepest || node->path.size() >= deepest->size()))
+                deepest = &node->path;
+    return deepest ? NodeRef{instance.id, *deepest} : NodeRef{};
+}
+
 void focusFrame(Session &session, int instance) {
     auto &view = viewOf(session);
     if (instance < 0 || std::size_t(instance) >= view.run.instances().size())
@@ -242,9 +261,12 @@ void focusFrame(Session &session, int instance) {
     view.revealFrame = true;
     session.tabs = {id};
     session.openTree(id);
-    session.setCursor(NodeRef{id, {}});
-    // A new tree is fitted, root first; scrolling to the cursor too would pin the root to an edge while the canvas
-    // is still settling.
+    // The cursor on what runs deepest here (else the root), and that node in view.
+    view.running = runningNode(session);
+    session.setCursor(view.running.empty() ? NodeRef{id, {}} : view.running);
+    session.view(id).fitOn = view.running;
+    // A new tree is fitted, around that node: scrolling to it as well would pin it to an edge while the canvas is
+    // still settling. The same tree scrolls only as far as it needs.
     if (otherTree) {
         session.view(id).fit = true;
         session.revealPending = false;

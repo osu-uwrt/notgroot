@@ -290,6 +290,48 @@ TEST_F(RunHarness, TimelineMovesLikeTheCanvas) {
     EXPECT_LT(view().clock, shown().second);
 }
 
+// Opening an instance while it runs puts its deepest running node under the cursor and keeps it in the fitted view;
+// Follow moves the cursor along as what runs changes inside the frame.
+TEST_F(RunHarness, OpeningARunningTreeShowsWhatRuns) {
+    const int move = instance("PrimitiveMovePosition");
+    ui::seekTime(session, run().spans(move).front().start + 1000);
+    ui::focusFrame(session, move);
+    frames(2);
+    const auto running = ui::runningNode(session);
+    ASSERT_FALSE(running.empty());
+    EXPECT_EQ(session.cursor.ref, running);
+    EXPECT_EQ(session.view(running.tree).fitOn, running);
+    RunStatus status;
+    bool faded = false;
+    ASSERT_TRUE(ui::cardStatus(session, session.cursor, status, faded));
+    EXPECT_EQ(status, RunStatus::Running);
+    // Nothing below it runs: it is the deepest.
+    for (const auto uid : run().instances()[std::size_t(move)].uids) {
+        const auto &path = run().node(uid)->path;
+        if (path.size() > running.path.size() && view().state.status[uid] == RunStatus::Running)
+            ADD_FAILURE() << "uid " << uid << " runs deeper";
+    }
+
+    // At the end nothing runs: the root.
+    ui::seekTransitions(session, run().transitions().size());
+    ui::focusFrame(session, 0);
+    EXPECT_TRUE(session.cursor.ref.isTree());
+
+    // Following, each step that changes the running node inside the frame moves the cursor to it.
+    press(ImGuiKey_F);
+    ui::seekTime(session, run().spans(move).front().start + 1000);
+    int moved = 0;
+    for (int i = 0; i < 40; ++i) {
+        const auto before = session.cursor.ref;
+        press(ImGuiKey_Period);
+        if (const auto now = ui::runningNode(session); !now.empty()) {
+            EXPECT_EQ(session.cursor.ref, now);
+            moved += now != before;
+        }
+    }
+    EXPECT_GT(moved, 0);
+}
+
 TEST_F(RunHarness, CardsShowTheirOwnInstance) {
     // Partway through the first move: its root runs, and a card opened in place under Dive's call shows the same.
     const int dive = instance("Dive"), move = instance("PrimitiveMovePosition");

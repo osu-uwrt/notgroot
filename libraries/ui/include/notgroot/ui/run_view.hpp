@@ -25,6 +25,7 @@ struct RunView {
     std::set<std::string> drifted;           // trees that differ from the editor's (by ID)
     bool revealFrame = true;                 // the Run panel scrolls to the frame's row
     std::int64_t shownFrom = 0, shownTo = 0; // the Timeline's span (equal: the whole run)
+    core::NodeRef running;                   // the frame's deepest running node last shown (Follow keeps it in view)
 };
 
 // Opens a .btlog in a session made for it; false and `error` when it can't be read.
@@ -37,7 +38,9 @@ int cardInstance(const Session &, const CardKey &);
 // What a card shows at the playhead: false when it has nothing to show. `faded`: idle again, showing its last result.
 bool cardStatus(const Session &, const CardKey &, core::RunStatus &status, bool &faded);
 
-// Puts an instance on the canvas.
+// The deepest node running in the frame (empty ref: none runs).
+core::NodeRef runningNode(const Session &);
+// Puts an instance on the canvas, with its deepest running node in view and under the cursor.
 void focusFrame(Session &, int instance);
 // The playhead: `applied` transitions, or a moment.
 void seekTransitions(Session &, std::size_t applied);
