@@ -74,6 +74,8 @@ bool Workspace::loadBuiltinModels(const fs::path &file, std::string &error) {
 
 void Workspace::close() {
     documents_.clear();
+    edited_.clear();
+    byPath_.clear();
     models_ = nullptr;
     directory_.clear();
     focus_.clear();
@@ -103,6 +105,8 @@ bool Workspace::openText(const fs::path &name, const std::string &text, std::str
 }
 
 Document *Workspace::add(std::unique_ptr<Document> document) {
+    touched(*document);
+    byPath_[document->path] = document.get();
     documents_.push_back(std::move(document));
     return documents_.back().get();
 }
@@ -192,6 +196,9 @@ bool Workspace::open(const fs::path &target, std::string &error) {
 }
 
 Document *Workspace::document(const fs::path &path) const {
+    // The index, unless a rename moved a document since it was built.
+    if (const auto found = byPath_.find(path); found != byPath_.end() && found->second->path == path)
+        return found->second;
     for (const auto &document : documents_)
         if (document->path == path)
             return document.get();
@@ -241,6 +248,9 @@ std::vector<std::string> Workspace::duplicateIds() const {
 void Workspace::reindex() {
     trees_.clear();
     duplicates_.clear();
+    byPath_.clear();
+    for (const auto &document : documents_)
+        byPath_.emplace(document->path, document.get());
     for (const auto &document : documents_) {
         if (document->deleted)
             continue;
@@ -270,6 +280,20 @@ void Workspace::reindex() {
             catalog_.add(std::move(model));
         }
     ++version_;
+}
+
+bool Workspace::edited(const Document &document) const {
+    auto &cached = edited_[&document];
+    if (cached.first != document.revision || !document.revision)
+        cached = {document.revision, document.dirty()};
+    return cached.second;
+}
+
+bool Workspace::anyEdited() const {
+    for (const auto &document : documents_)
+        if (edited(*document))
+            return true;
+    return false;
 }
 
 fs::path Workspace::subtreePath(const std::string &id) const {
@@ -442,8 +466,9 @@ std::vector<fs::path> Workspace::save(std::vector<std::string> &errors) {
     if (readOnly_)
         return written;
     for (const auto &document : documents_)
-        if (document->dirty() && !document->deleted && document->role != DocumentRole::Models)
-            updateIncludes(*document);
+        if (document->dirty() && !document->deleted && document->role != DocumentRole::Models &&
+            updateIncludes(*document))
+            touched(*document);
 
     for (const auto &document : documents_) {
         if (!document->dirty())
@@ -457,6 +482,7 @@ std::vector<fs::path> Workspace::save(std::vector<std::string> &errors) {
             }
             document->onDisk = false;
             document->savedText.clear();
+            touched(*document);
             written.push_back(document->path);
             continue;
         }
@@ -485,6 +511,7 @@ std::vector<fs::path> Workspace::save(std::vector<std::string> &errors) {
         document->savedTime = modified(document->path);
         document->onDisk = true;
         document->cleanText = text;
+        touched(*document);
         written.push_back(document->path);
     }
     reindex();
@@ -526,6 +553,7 @@ void Workspace::reload(Document &document) {
         document.error = {"cannot read " + document.path.string(), 0};
     }
     document.cleanText = canonical(document);
+    touched(document);
     reindex();
 }
 } // namespace notgroot::core

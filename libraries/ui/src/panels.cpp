@@ -60,7 +60,7 @@ void drawExplorer(Session &session) {
             return;
         for (const auto &[score, key] : shown) {
             const auto *entry = session.workspace.tree(key);
-            const bool dirty = entry->document->dirty();
+            const bool dirty = session.workspace.edited(*entry->document);
             int worst = 3;
             for (const auto &problem : session.problems())
                 if (problem.node.tree == key && problem.node.path.empty())

@@ -250,7 +250,24 @@ std::vector<Problem> validateTree(const Workspace &workspace, const std::string 
     return out;
 }
 
-std::vector<Problem> validate(const Workspace &workspace) {
+// What a tree's problems depend on: its document, the documents of the subtrees it calls, the node models and which
+// trees exist.
+std::vector<std::size_t> stampOf(const Workspace &workspace, const TreeEntry &entry, std::size_t treeSet) {
+    std::vector<std::size_t> stamp{entry.document->revision, workspace.models() ? workspace.models()->revision : 0,
+                                   treeSet};
+    std::function<void(const Element &)> calls = [&](const Element &element) {
+        for (const auto *child : element.elements()) {
+            if (isSubTree(*child))
+                if (const auto *called = workspace.tree(child->get("ID")))
+                    stamp.push_back(called->document->revision);
+            calls(*child);
+        }
+    };
+    calls(*entry.tree);
+    return stamp;
+}
+
+std::vector<Problem> validate(const Workspace &workspace, ValidationCache *cache) {
     std::vector<Problem> out;
     for (const auto &document : workspace.documents()) {
         if (document->deleted)
@@ -314,8 +331,10 @@ std::vector<Problem> validate(const Workspace &workspace) {
         }
         for (const auto *include : document->root->elements())
             if (include->tag == "include") {
+                // The lexical path first: asking the file system for every include on every edit is slow.
                 const auto target = document->path.parent_path() / include->get("path");
-                if (!workspace.document(std::filesystem::weakly_canonical(target)) && !std::filesystem::exists(target))
+                if (!workspace.document(target.lexically_normal()) &&
+                    !workspace.document(std::filesystem::weakly_canonical(target)) && !std::filesystem::exists(target))
                     out.push_back({Severity::Error,
                                    "included file " + include->get("path") + " does not exist",
                                    document->path,
@@ -333,8 +352,27 @@ std::vector<Problem> validate(const Workspace &workspace) {
                        NodeRef{id, {}},
                        {}});
     }
-    for (const auto &[key, entry] : workspace.trees())
-        checkTree(workspace, entry, out);
+    if (!cache) {
+        for (const auto &[key, entry] : workspace.trees())
+            checkTree(workspace, entry, out);
+    } else {
+        std::size_t treeSet = 0;
+        for (const auto &[key, entry] : workspace.trees())
+            treeSet = treeSet * 31 + std::hash<std::string>{}(key);
+        std::map<std::string, ValidationCache::Entry> kept;
+        for (const auto &[key, entry] : workspace.trees()) {
+            auto stamp = stampOf(workspace, entry, treeSet);
+            auto found = cache->trees_.find(key);
+            if (found == cache->trees_.end() || found->second.stamp != stamp) {
+                std::vector<Problem> problems;
+                checkTree(workspace, entry, problems);
+                found = cache->trees_.insert_or_assign(key, ValidationCache::Entry{std::move(stamp), problems}).first;
+            }
+            out.insert(out.end(), found->second.problems.begin(), found->second.problems.end());
+            kept.insert(*found);
+        }
+        cache->trees_ = std::move(kept);
+    }
     checkCycles(workspace, out);
     return out;
 }

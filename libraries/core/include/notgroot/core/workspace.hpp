@@ -23,6 +23,8 @@ struct Document {
     bool onDisk = false;                       // the file existed when read / was written
     bool deleted = false;                      // removed in the editor: deleted from disk on save
     std::optional<std::string> cleanText;      // what it was when read or saved (the dirty check compares to it)
+    // A new number whenever its content may have changed (Workspace::touched): caches key on it.
+    unsigned revision = 0;
 
     std::string text() const; // what saving would write
     bool dirty() const;
@@ -97,6 +99,15 @@ class Workspace {
     unsigned version() const {
         return version_;
     }
+    // Gives a document a new revision: History does after every change it records, and the workspace after reading
+    // or writing a file.
+    void touched(Document &document) {
+        document.revision = ++revisions_;
+    }
+    // Document::dirty() (which writes the whole document out) remembered for each revision, for views that ask every
+    // frame. Code that has just changed a document itself asks dirty().
+    bool edited(const Document &) const;
+    bool anyEdited() const;
 
     // --- changing the set of documents (through History to make them undoable) ---
     // A new lib/<ID>.xml with an empty tree (not on disk until saved).
@@ -140,6 +151,9 @@ class Workspace {
     bool loose_ = false;
     bool readOnly_ = false;
     unsigned version_ = 0;
+    unsigned revisions_ = 0;
+    mutable std::map<const Document *, std::pair<unsigned, bool>> edited_; // revision, dirty
+    std::map<std::filesystem::path, Document *> byPath_;                   // as of the last reindex() or add()
 };
 
 // Reads a file into a string; false if it cannot be read.

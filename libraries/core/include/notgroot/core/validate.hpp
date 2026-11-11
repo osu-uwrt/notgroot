@@ -3,6 +3,7 @@
 #pragma once
 #include "notgroot/core/edit.hpp"
 #include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -18,7 +19,19 @@ struct Problem {
     std::string attribute; // the attribute it is about, if any
 };
 
-std::vector<Problem> validate(const Workspace &);
+// Each tree's problems between runs of validate(): it then checks again only the trees whose own document, the
+// subtrees they call, the node models or the set of trees changed since (by Document::revision).
+class ValidationCache {
+  private:
+    friend std::vector<Problem> validate(const Workspace &, ValidationCache *);
+    struct Entry {
+        std::vector<std::size_t> stamp;
+        std::vector<Problem> problems;
+    };
+    std::map<std::string, Entry> trees_;
+};
+
+std::vector<Problem> validate(const Workspace &, ValidationCache *cache = nullptr);
 // Only the problems of one tree (for the canvas as you edit).
 std::vector<Problem> validateTree(const Workspace &, const std::string &treeKey);
 

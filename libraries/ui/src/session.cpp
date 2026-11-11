@@ -368,7 +368,7 @@ void Session::validateCursor() {
 const std::vector<Problem> &Session::problems() {
     if (problemsVersion_ != workspace.version()) {
         problemsVersion_ = workspace.version();
-        problems_ = validate(workspace);
+        problems_ = validate(workspace, &validation_);
         problems_.insert(problems_.begin(), btProblems.begin(), btProblems.end());
         severity_.clear();
         for (const auto &problem : problems_) {
@@ -403,7 +403,12 @@ ImVec4 Session::keyColor(const std::string &tree, const std::string &key) {
         std::vector<std::string> keys;
         for (const auto &[name, info] : variables(tree).keys)
             keys.push_back(name);
-        cached = {workspace.version(), currentTheme(), keyColors(keys)};
+        // An edit that leaves the tree's keys as they were keeps their colors (picking them is the slow part).
+        if (keys != cached.keys || cached.theme != currentTheme())
+            cached.colors = keyColors(keys);
+        cached.version = workspace.version();
+        cached.theme = currentTheme();
+        cached.keys = std::move(keys);
     }
     const auto found = cached.colors.find(key);
     return found != cached.colors.end() ? found->second : keyColors({key}).begin()->second;

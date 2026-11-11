@@ -547,3 +547,79 @@ TEST_F(Fixture, SubtreePortDefaultsAreFlagged) {
     EXPECT_TRUE(std::any_of(problems.begin(), problems.end(),
                             [](auto &p) { return p.message.find("has default=") != std::string::npos; }));
 }
+
+namespace {
+// Two lists of problems are the same, in order.
+void expectSameProblems(const std::vector<Problem> &cached, const std::vector<Problem> &fresh,
+                        const std::string &after) {
+    ASSERT_EQ(cached.size(), fresh.size()) << "after " << after;
+    for (std::size_t i = 0; i < fresh.size(); ++i) {
+        EXPECT_EQ(cached[i].message, fresh[i].message) << "after " << after;
+        EXPECT_EQ(cached[i].severity, fresh[i].severity) << "after " << after;
+        EXPECT_EQ(cached[i].file, fresh[i].file) << "after " << after;
+        EXPECT_EQ(cached[i].line, fresh[i].line) << "after " << after;
+        EXPECT_EQ(cached[i].node, fresh[i].node) << "after " << after;
+        EXPECT_EQ(cached[i].attribute, fresh[i].attribute) << "after " << after;
+    }
+}
+} // namespace
+
+// Checking only the trees that may have changed finds what checking everything finds, edit after edit.
+TEST_F(Fixture, CachedValidationMatchesAFullOne) {
+    ValidationCache cache;
+    const auto same = [&](const std::string &after) {
+        expectSameProblems(validate(workspace, &cache), validate(workspace), after);
+    };
+    same("opening");
+    same("nothing");
+
+    // A call's port, a subtree's own node, the subtree's ports (which its callers' checks read), then undo all.
+    const auto move = refOf(workspace, nodeChildren(*resolve(workspace, sequence()))[2]);
+    ASSERT_TRUE(editor.setAttribute(move, "x", "{nowhere}"));
+    same("a call's port");
+    const auto settle = workspace.tree("Settle");
+    ASSERT_TRUE(settle);
+    ASSERT_TRUE(editor.setAttribute(refOf(workspace, nodeChildren(*settle->tree).front()), "name", "renamed"));
+    same("a subtree's node");
+    ASSERT_TRUE(editor.setSubtreePorts("Move", {}, {}));
+    same("a subtree's ports");
+    ASSERT_TRUE(editor.remove({refOf(workspace, nodeChildren(*resolve(workspace, sequence()))[1])}));
+    same("deleting a node");
+    ASSERT_TRUE(editor.renameTree("Settle", "Rest"));
+    same("renaming a subtree");
+    EXPECT_FALSE(editor.createSubtree("Fresh").empty());
+    same("a new subtree");
+    while (history.undo())
+        same("undo");
+    while (history.redo())
+        same("redo");
+}
+
+TEST(Validation, CachedMatchesFullOnTheRealTrees) {
+    const auto trees = notgroot::test::realTrees();
+    if (trees.empty())
+        GTEST_SKIP() << "no trees directory";
+    ScratchCopy copy(trees.string()); // an absolute path copies that folder
+    Workspace workspace;
+    History history{workspace};
+    Editor editor{workspace, history};
+    openWorkspace(workspace, copy.path());
+    ValidationCache cache;
+    expectSameProblems(validate(workspace, &cache), validate(workspace), "opening");
+    // A port of every tenth tree's first node, then a save.
+    int n = 0;
+    for (const auto &[key, entry] : std::map<std::string, TreeEntry>(workspace.trees())) {
+        if (n++ % 10)
+            continue;
+        const auto nodes = nodeChildren(*workspace.tree(key)->tree);
+        if (nodes.empty())
+            continue;
+        ASSERT_TRUE(editor.setAttribute(refOf(workspace, nodes.front()), "name", "edited" + std::to_string(n)));
+        expectSameProblems(validate(workspace, &cache), validate(workspace), "editing " + key);
+    }
+    std::vector<std::string> errors;
+    workspace.save(errors);
+    expectSameProblems(validate(workspace, &cache), validate(workspace), "saving");
+    while (history.undo())
+        expectSameProblems(validate(workspace, &cache), validate(workspace), "undo");
+}

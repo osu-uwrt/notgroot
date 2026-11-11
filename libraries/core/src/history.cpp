@@ -36,6 +36,7 @@ void History::commit() {
     // Keep only documents that really changed; nothing changed, no step.
     Step step{pending_.label, {}, {}};
     for (auto &before : pending_.before) {
+        workspace_.touched(*before.document);
         auto after = capture(*before.document);
         const bool same =
             before.deleted == after.deleted &&
@@ -60,8 +61,10 @@ void History::cancel() {
     if (depth_ == 0)
         return;
     depth_ = 0;
-    for (const auto &snapshot : pending_.before)
+    for (const auto &snapshot : pending_.before) {
         restore(snapshot);
+        workspace_.touched(*snapshot.document);
+    }
     pending_ = {};
     workspace_.reindex();
 }
@@ -82,6 +85,7 @@ bool History::apply(std::vector<Step> &from, std::vector<Step> &to, bool undoing
     lastTouched_.clear();
     for (const auto &snapshot : undoing ? step.before : step.after) {
         restore(snapshot);
+        workspace_.touched(*snapshot.document);
         lastTouched_.push_back(snapshot.document);
     }
     to.push_back(std::move(step));

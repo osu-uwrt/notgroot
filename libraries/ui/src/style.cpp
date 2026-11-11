@@ -185,13 +185,19 @@ float cie94(const std::array<float, 3> &p, const std::array<float, 3> &q) {
 }
 
 // Readable key colors for the theme: every 5° of hue at a few strengths, each nudged until it reads on the paper.
-const std::vector<std::pair<float, ImVec4>> &keyCandidates() {
+// `generation` changes whenever they do.
+const std::vector<std::pair<float, ImVec4>> &keyCandidates(unsigned *generation = nullptr) {
     static std::vector<std::pair<float, ImVec4>> candidates;
     static std::string theme;
     static float paperLight = -1;
+    static unsigned built = 0;
+    if (generation)
+        *generation = built + 1;
     const ImVec4 paper = ImGui::GetStyle().Colors[ImGuiCol_FrameBg];
     if (theme == currentTheme() && paperLight == paper.x + paper.y + paper.z)
         return candidates;
+    if (generation)
+        *generation = ++built + 1;
     theme = currentTheme();
     paperLight = paper.x + paper.y + paper.z;
     candidates.clear();
@@ -224,30 +230,41 @@ float colorDistance(ImVec4 a, ImVec4 b) {
 std::map<std::string, ImVec4> keyColors(std::vector<std::string> keys) {
     std::sort(keys.begin(), keys.end());
     keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
-    const auto &candidates = keyCandidates();
-    std::vector<std::array<float, 3>> labs;
-    for (const auto &[tag, color] : candidates)
-        labs.push_back(lab(color));
-    std::vector<bool> taken(candidates.size(), false);
+    unsigned generation = 0;
+    const auto &candidates = keyCandidates(&generation);
+    // Every pair's distance, once per set of candidates (a theme): the picking below asks for them many times over.
+    static unsigned distancesFor = 0;
+    static std::vector<float> distances;
+    const std::size_t count = candidates.size();
+    if (distancesFor != generation || distances.size() != count * count) {
+        std::vector<std::array<float, 3>> labs;
+        for (const auto &[tag, color] : candidates)
+            labs.push_back(lab(color));
+        distances.assign(count * count, 0);
+        for (std::size_t i = 0; i < count; ++i)
+            for (std::size_t j = i + 1; j < count; ++j)
+                distances[i * count + j] = distances[j * count + i] = cie94(labs[i], labs[j]);
+        distancesFor = generation;
+    }
+    const auto distance = [&](std::size_t i, std::size_t j) { return distances[i * count + j]; };
+
+    std::vector<bool> taken(count, false);
     std::vector<std::size_t> chosen;
     std::map<std::string, ImVec4> colors;
+    // How far each candidate is from the colors given so far.
+    std::vector<float> apart(count, 1e9f);
     for (const auto &key : keys) {
         const float preferred = float(hash(key) % 360);
-        // How far each candidate is from the colors already given. The farthest set the bar; among the candidates
-        // close to it (or far enough anyway), the one nearest the hue the name picks.
-        std::vector<float> apart(candidates.size(), 1e9f);
+        // The farthest set the bar; among the candidates close to it (or far enough anyway), the one nearest the hue
+        // the name picks.
         float farthest = 0;
-        for (std::size_t i = 0; i < candidates.size(); ++i) {
-            if (taken[i])
-                continue;
-            for (const auto j : chosen)
-                apart[i] = std::min(apart[i], cie94(labs[i], labs[j]));
-            farthest = std::max(farthest, apart[i]);
-        }
+        for (std::size_t i = 0; i < count; ++i)
+            if (!taken[i])
+                farthest = std::max(farthest, apart[i]);
         const float bar = farthest * .98f;
         std::size_t best = 0;
         float bestNear = 1e9f;
-        for (std::size_t i = 0; i < candidates.size(); ++i) {
+        for (std::size_t i = 0; i < count; ++i) {
             if (taken[i] || apart[i] < bar)
                 continue;
             const float hue = std::fmod(candidates[i].first, 1000.f);
@@ -260,26 +277,30 @@ std::map<std::string, ImVec4> keyColors(std::vector<std::string> keys) {
         }
         taken[best] = true;
         chosen.push_back(best);
+        for (std::size_t i = 0; i < count; ++i)
+            apart[i] = std::min(apart[i], distance(i, best));
     }
 
     // Then each in turn moves to the free color farthest from all the others, a few rounds: picking one at a time
     // leaves the first ones crowded by the later ones.
-    const auto distance = [&](std::size_t i, std::size_t j) { return cie94(labs[i], labs[j]); };
+    std::vector<float> nearest(count);
     for (int round = 0; round < 4 && chosen.size() > 1; ++round)
         for (std::size_t k = 0; k < chosen.size(); ++k) {
-            const auto nearest = [&](std::size_t i) {
-                float least = 1e9f;
-                for (std::size_t other = 0; other < chosen.size(); ++other)
-                    if (other != k)
-                        least = std::min(least, distance(i, chosen[other]));
-                return least;
-            };
+            // Each candidate's distance to the nearest of the others, in one pass.
+            std::fill(nearest.begin(), nearest.end(), 1e9f);
+            for (std::size_t other = 0; other < chosen.size(); ++other) {
+                if (other == k)
+                    continue;
+                const float *row = &distances[chosen[other] * count];
+                for (std::size_t i = 0; i < count; ++i)
+                    nearest[i] = std::min(nearest[i], row[i]);
+            }
             std::size_t best = chosen[k];
-            float bestApart = nearest(best);
-            for (std::size_t i = 0; i < candidates.size(); ++i)
-                if (!taken[i] && nearest(i) > bestApart + .5f) {
+            float bestApart = nearest[best];
+            for (std::size_t i = 0; i < count; ++i)
+                if (!taken[i] && nearest[i] > bestApart + .5f) {
                     best = i;
-                    bestApart = nearest(i);
+                    bestApart = nearest[i];
                 }
             taken[chosen[k]] = false;
             taken[best] = true;

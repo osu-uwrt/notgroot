@@ -1380,7 +1380,7 @@ void drawCanvas(Session &session) {
                 continue;
             }
             bool open = true;
-            const bool dirty = entry && entry->document->dirty();
+            const bool dirty = entry && session.workspace.edited(*entry->document);
             ImGuiTabItemFlags flags = dirty ? ImGuiTabItemFlags_UnsavedDocument : 0;
             if (key == session.active && shown != session.active)
                 flags |= ImGuiTabItemFlags_SetSelected;

@@ -200,7 +200,7 @@ void App::updateTitle() {
     if (showingRun_ && run_)
         title = "RUN " + run_->runView->title + " — notgroot";
     else if (session_.workspace.isOpen())
-        title = (session_.dirty() ? "• " : "") + session_.workspace.directory().string() +
+        title = (session_.workspace.anyEdited() ? "• " : "") + session_.workspace.directory().string() +
                 (session_.active.empty() ? "" : " — " + session_.active) + " — notgroot";
     if (title != title_) {
         title_ = title;

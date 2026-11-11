@@ -238,11 +238,13 @@ class Session {
     bool checkAgain_ = false; // saved again while a check ran
     unsigned problemsVersion_ = ~0u;
     std::vector<core::Problem> problems_;
+    core::ValidationCache validation_; // each tree's problems, checked again only when they may have changed
     std::map<core::NodeRef, int> severity_;
     std::map<std::string, std::pair<unsigned, core::TreeVariables>> variables_;
     struct KeyColors {
         unsigned version = ~0u;
         std::string theme;
+        std::vector<std::string> keys; // the colors were picked for these
         std::map<std::string, ImVec4> colors;
     };
     std::map<std::string, KeyColors> keyColors_;
