@@ -222,8 +222,12 @@ void focusFrame(Session &session, int instance) {
     session.tabs = {id};
     session.openTree(id);
     session.setCursor(NodeRef{id, {}});
-    if (otherTree)
+    // A new tree is fitted, root first; scrolling to the cursor too would pin the root to an edge while the canvas
+    // is still settling.
+    if (otherTree) {
         session.view(id).fit = true;
+        session.revealPending = false;
+    }
 }
 
 void seekTransitions(Session &session, std::size_t applied) {

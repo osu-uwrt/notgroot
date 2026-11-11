@@ -84,6 +84,7 @@ App::App(Options options) : opt_(std::move(options)) {
     picker_.setParent(0);
     runPicker_.setParent(0);
     session_.horizontal = preference("layout") == "left-right";
+    placeRunPanels_ = preference("run_panels_placed").empty();
     if (!config_.empty() && fs::exists(config_ / "notgroot.yaml"))
         try {
             for (const auto &path : YAML::LoadFile((config_ / "notgroot.yaml").string())["recent"])
@@ -472,7 +473,14 @@ void App::frame() {
             draw(shown());
         ImGui::End();
     };
-    const auto runPanel = [&](const char *name, void (*draw)(ui::Session &)) {
+    // A layout saved before these panels existed has no place for them: once, they dock beside a panel it has (Run
+    // with Trees, Timeline with Problems) instead of floating. Moved after that, they stay where they are put.
+    bool placed = false;
+    const auto runPanel = [&](const char *name, const char *beside, void (*draw)(ui::Session &)) {
+        if (const auto *other = ImGui::FindWindowByName(beside); placeRunPanels_ && other && other->DockId) {
+            ImGui::SetNextWindowDockID(other->DockId);
+            placed = true;
+        }
         if (ImGui::Begin(name, nullptr)) {
             if (run_)
                 draw(*run_);
@@ -499,8 +507,12 @@ void App::frame() {
     shownPanel("Inspector", ui::drawInspector);
     shownPanel("Variables", ui::drawVariables);
     panel("Problems", ui::drawProblems);
-    runPanel("Run", ui::drawRunPanel);
-    runPanel("Timeline", ui::drawTimeline);
+    runPanel("Run", "Trees", ui::drawRunPanel);
+    runPanel("Timeline", "Problems", ui::drawTimeline);
+    if (placed) {
+        placeRunPanels_ = false;
+        savePreference("run_panels_placed", "yes");
+    }
 
     ui::drawFinder(shown());
     ui::drawPicker(shown());
