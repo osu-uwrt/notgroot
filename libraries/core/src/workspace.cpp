@@ -78,7 +78,28 @@ void Workspace::close() {
     directory_.clear();
     focus_.clear();
     loose_ = false;
+    readOnly_ = false;
     reindex();
+}
+
+bool Workspace::openText(const fs::path &name, const std::string &text, std::string &error) {
+    auto document = std::make_unique<Document>();
+    document->path = name;
+    document->savedText = text;
+    document->root = parseXml(text, document->error);
+    if (!document->root) {
+        error = name.string() + ":" + std::to_string(document->error.line) + ": " + document->error.message;
+        return false;
+    }
+    close();
+    document->onDisk = true;
+    document->cleanText = canonical(*document);
+    add(std::move(document));
+    loose_ = readOnly_ = true;
+    directory_ = name.parent_path();
+    focus_ = name;
+    reindex();
+    return true;
 }
 
 Document *Workspace::add(std::unique_ptr<Document> document) {
@@ -235,6 +256,12 @@ void Workspace::reindex() {
         catalog_.addTreeNodesModel(*builtins_, true);
     if (models_ && !models_->deleted && models_->root)
         catalog_.addTreeNodesModel(*models_->root, false);
+    if (readOnly_)
+        for (const auto &document : documents_)
+            if (const auto *model = document->root ? document->root->firstChild("TreeNodesModel") : nullptr)
+                for (const auto *entry : model->elements())
+                    if (entry->has("ID") && !catalog_.find(entry->get("ID")))
+                        catalog_.add(readModel(*entry, false));
     for (const auto &[id, entry] : trees_)
         if (id == entry.id && !catalog_.find(id)) {
             NodeModel model;
@@ -412,6 +439,8 @@ bool Workspace::updateIncludes(Document &document) {
 
 std::vector<fs::path> Workspace::save(std::vector<std::string> &errors) {
     std::vector<fs::path> written;
+    if (readOnly_)
+        return written;
     for (const auto &document : documents_)
         if (document->dirty() && !document->deleted && document->role != DocumentRole::Models)
             updateIncludes(*document);
@@ -464,6 +493,8 @@ std::vector<fs::path> Workspace::save(std::vector<std::string> &errors) {
 
 std::vector<Document *> Workspace::changedOnDisk() const {
     std::vector<Document *> changed;
+    if (readOnly_)
+        return changed;
     for (const auto &document : documents_) {
         if (!document->onDisk)
             continue;

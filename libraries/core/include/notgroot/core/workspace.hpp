@@ -46,7 +46,13 @@ class Workspace {
     // Opens a trees directory (it has lib/node_models.xml), a file inside one (opens that workspace), or a loose file
     // and the files it includes. Replaces whatever was open.
     bool open(const std::filesystem::path &target, std::string &error);
+    // Opens one document's text without files (a run's trees, run.hpp): read-only, nothing is ever saved, and its
+    // <TreeNodesModel> adds the models the catalog doesn't have. `name` stands in for its path.
+    bool openText(const std::filesystem::path &name, const std::string &text, std::string &error);
     void close();
+    bool readOnly() const {
+        return readOnly_;
+    }
     bool isOpen() const {
         return !documents_.empty();
     }
@@ -132,6 +138,7 @@ class Workspace {
     std::vector<std::string> duplicates_;
     std::filesystem::path directory_, focus_;
     bool loose_ = false;
+    bool readOnly_ = false;
     unsigned version_ = 0;
 };
 

@@ -44,6 +44,18 @@ inline std::filesystem::path realTrees() {
     return {};
 }
 
+// Real run logs (.btlog): NOTGROOT_RUNS_DIR, else ~/btlogs, else empty.
+inline std::filesystem::path realRuns() {
+    if (const char *dir = std::getenv("NOTGROOT_RUNS_DIR"); dir && *dir)
+        return dir;
+    if (const char *home = std::getenv("HOME")) {
+        const auto runs = std::filesystem::path(home) / "btlogs";
+        if (std::filesystem::is_directory(runs))
+            return runs;
+    }
+    return {};
+}
+
 inline void openWorkspace(core::Workspace &workspace, const std::filesystem::path &path) {
     std::string error;
     ASSERT_TRUE(workspace.loadBuiltinModels(NOTGROOT_BUILTIN_MODELS, error)) << error;
