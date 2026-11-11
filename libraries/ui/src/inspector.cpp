@@ -182,29 +182,35 @@ void treeInspector(Session &session, const std::string &key) {
     ImGui::TextColored(subtree ? categoryColor(Category::SubTree) : rootColor(), "%s", key.c_str());
     ImGui::PopFont();
     ImGui::TextDisabled("%s · %s", subtree ? "subtree" : "mission", entry->document->path.string().c_str());
-    if (ImGui::Button("Rename…"))
-        session.ask(Session::Dialog::RenameTree, key, key);
-    ImGui::SameLine();
-    if (subtree && ImGui::Button("Edit ports…"))
-        session.ask(Session::Dialog::EditPorts, key);
-    if (subtree)
+    // A run's trees are as they ran: nothing to rename, recolor or delete.
+    const bool fixed = session.workspace.readOnly();
+    if (!fixed) {
+        if (ImGui::Button("Rename…"))
+            session.ask(Session::Dialog::RenameTree, key, key);
         ImGui::SameLine();
-    if (ImGui::Button("Delete"))
-        session.run("tree.delete");
+        if (subtree && ImGui::Button("Edit ports…"))
+            session.ask(Session::Dialog::EditPorts, key);
+        if (subtree)
+            ImGui::SameLine();
+        if (ImGui::Button("Delete"))
+            session.run("tree.delete");
+    }
 
     if (subtree) {
         // Its color on every call (btstudio's custom subtree colors), kept as a notgroot:color comment.
         const auto hex = treeColor(session.workspace, id);
         ImVec4 color = subtreeColor(hex);
         float rgb[3] = {color.x, color.y, color.z};
+        ImGui::BeginDisabled(fixed);
         ImGui::ColorEdit3("Color", rgb, ImGuiColorEditFlags_NoInputs);
+        ImGui::EndDisabled();
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             char text[8];
             std::snprintf(text, sizeof(text), "#%02x%02x%02x", int(rgb[0] * 255 + .5f), int(rgb[1] * 255 + .5f),
                           int(rgb[2] * 255 + .5f));
             session.edited(session.editor.setTreeColor(id, text));
         }
-        if (!hex.empty()) {
+        if (!hex.empty() && !fixed) {
             ImGui::SameLine();
             if (ImGui::SmallButton("Default color"))
                 session.edited(session.editor.setTreeColor(id, ""));
@@ -212,7 +218,7 @@ void treeInspector(Session &session, const std::string &key) {
         sectionTitle("Ports");
         const auto model = session.workspace.subtreeModel(id);
         if (model.ports.empty())
-            emptyState("No ports: callers pass nothing in or out. Edit ports… to add some.");
+            emptyState(fixed ? "No ports." : "No ports: callers pass nothing in or out. Edit ports… to add some.");
         for (const auto &port : model.ports) {
             ImGui::TextColored(directionColor(port.direction), "%-3s", directionBadge(port.direction));
             ImGui::SameLine();
@@ -282,6 +288,9 @@ void drawInspector(Session &session) {
             if (nextButton("Edit ports…"))
                 session.ask(Session::Dialog::EditPorts, id);
         }
+    } else if (session.runView) {
+        if (call && ImGui::SmallButton("Go into it (Enter)"))
+            session.run("node.definition");
     } else {
         if (ImGui::SmallButton("Unlock to edit here (Ctrl+U)"))
             session.run("tree.lock");

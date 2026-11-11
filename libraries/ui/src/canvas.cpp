@@ -2,6 +2,7 @@
 #include "notgroot/core/globals.hpp"
 #include "notgroot/core/layout.hpp"
 #include "notgroot/ui/panels.hpp"
+#include "notgroot/ui/run_view.hpp"
 #include "notgroot/ui/style.hpp"
 #include "notgroot/ui/theme.hpp"
 #include <algorithm>
@@ -399,6 +400,7 @@ void build(Session &session, Scene &scene, const Element &element, const CardKey
 std::size_t signature(Session &session) {
     std::size_t h = std::hash<std::string>{}(session.active);
     const auto mix = [&](std::size_t v) { h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2); };
+    mix(std::hash<const void *>{}(&session)); // the editor and a run each have a workspace at version 1
     mix(session.workspace.version());
     mix(session.horizontal);
     mix(std::hash<float>{}(interfaceScale()));
@@ -845,15 +847,17 @@ void drawEdges(const Scene &scene, const View &view, ImDrawList *draw, bool hori
     }
 }
 
+// `status`: in a run, the card's status at the playhead (-1: none); `faded`: idle again, with that last result.
 void drawCard(Session &session, const Card &card, const View &view, ImDrawList *draw, const Metrics &m, bool cursor,
-              bool picked, bool matched, int severity) {
+              bool picked, bool matched, int severity, int status = -1, bool faded = false) {
     const float z = view.zoom;
     const ImVec2 a = view.at(card.position),
                  b = view.at({card.position.x + card.size.x, card.position.y + card.size.y});
     const float rounding = ui(5) * z;
     const auto &style = ImGui::GetStyle();
-    // A locked subtree opened in place is grayed: it is shown, not edited here.
-    const bool readOnly = card.readOnly;
+    // A locked subtree opened in place is grayed: it is shown, not edited here. A run is all read-only, so nothing
+    // grays.
+    const bool readOnly = card.readOnly && !session.runView;
     const float alpha = readOnly ? .55f : 1.f;
     const ImVec4 body = style.Colors[ImGuiCol_FrameBg];
     const ImVec4 band = !card.color.empty() ? subtreeColor(card.color)
@@ -875,6 +879,14 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
                             ImGui::GetColorU32(ImVec4(0, 0, 0, darkTheme() ? .35f : .12f)), rounding);
     draw->AddRectFilled(a, b, ImGui::GetColorU32(readOnly ? mix(body, style.Colors[ImGuiCol_WindowBg], .5f) : body),
                         rounding);
+    // A run's status tints the body; running pulses.
+    const ImVec4 statusInk = status < 0 ? ImVec4() : runStatusColor(RunStatus(status));
+    float statusAlpha = faded ? .6f : 1.f;
+    if (status == int(RunStatus::Running) && !faded)
+        statusAlpha = .7f + .3f * std::sin(float(ImGui::GetTime()) * 6.f);
+    if (status >= 0)
+        draw->AddRectFilled(a, b, ImGui::GetColorU32(withAlpha(statusInk, faded ? .07f : .16f * statusAlpha)),
+                            rounding);
     const float headerHeight = (m.header + (card.subtitle.empty() ? 0 : m.body->FontSize + m.rowGap)) * z;
     if (!card.rows.empty())
         draw->AddLine({a.x, std::round(a.y + headerHeight)}, {b.x, std::round(a.y + headerHeight)},
@@ -959,7 +971,8 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
              "floating");
     } else if (card.call)
         dashedRect(draw, a, b, edge, std::max(1.f, ui(1.5f) * z), ui(5) * z);
-    else if (card.key.inside() && !readOnly) // editable in place: edged in the warning color, apart from its caller
+    else if (card.key.inside() &&
+             !card.readOnly) // editable in place: edged in the warning color, apart from its caller
         draw->AddRect(a, b, ImGui::GetColorU32(withAlpha(palette().warn, .55f)), rounding, 0, std::max(1.f, z));
     else
         draw->AddRect(a, b, ImGui::GetColorU32(withAlpha(style.Colors[ImGuiCol_Border], alpha)), rounding, 0,
@@ -970,6 +983,8 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
     };
     if ((severity == 0 || severity == 1) && !card.floating)
         ring(severityColor(severity), std::max(1.5f, ui(2) * z), ui(1) * z);
+    if (status >= 0)
+        ring(withAlpha(statusInk, statusAlpha), std::max(faded ? 1.5f : 2.5f, ui(faded ? 1.5f : 3) * z), ui(1) * z);
     if (keyed)
         ring(session.keyColor(card.key.ref.tree, session.highlightKey), std::max(1.5f, ui(2) * z), ui(3) * z);
     if (matched)
@@ -979,10 +994,18 @@ void drawCard(Session &session, const Card &card, const View &view, ImDrawList *
     if (cursor)
         ring(palette().accent, std::max(2.f, ui(3) * z), ui(5) * z);
 
-    // Above a call: how many trees use it (after the floating tag, if it has one).
+    // Above a call: how many trees use it (after the floating tag, if it has one); in a run, how often it ran.
     if (card.call) {
         const int trees = session.treesUsing(card.title);
-        const std::string uses = std::to_string(trees) + (trees == 1 ? " tree" : " trees");
+        std::string uses = std::to_string(trees) + (trees == 1 ? " tree" : " trees");
+        if (session.runView) {
+            const auto &run = session.runView->run;
+            const int called = run.calledBy(run.uidAt(cardInstance(session, card.key), card.key.ref.path));
+            const auto runs = run.spans(called).size();
+            uses = !runs ? "not run" : "ran " + std::to_string(runs) + "×";
+            if (const int failures = run.failures(called))
+                uses += ", failed " + std::to_string(failures) + "×";
+        }
         const float after = card.floating ? drawnWidth(view, "floating") + m.pad * z : 0;
         text(draw, view.body, view.bodySize, {a.x + after, a.y - (usesRoom(m) - ui(1)) * z},
              ImGui::GetColorU32(withAlpha(palette().muted, alpha)), uses.c_str());
@@ -1343,9 +1366,11 @@ Drop dropAt(Session &session, const Scene &scene, int under, ImVec2 mouse, ImVec
 } // namespace
 
 void drawCanvas(Session &session) {
-    // Tree tabs.
-    if (ImGui::BeginTabBar("##trees", ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_FittingPolicyScroll |
-                                          ImGuiTabBarFlags_AutoSelectNewTabs)) {
+    // Tree tabs; in a run, where the frame is instead.
+    if (session.runView)
+        drawBreadcrumb(session);
+    else if (ImGui::BeginTabBar("##trees", ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_FittingPolicyScroll |
+                                               ImGuiTabBarFlags_AutoSelectNewTabs)) {
         std::string closing;
         static std::string shown;
         for (const auto &key : session.tabs) {
@@ -1560,7 +1585,8 @@ void drawCanvas(Session &session) {
             const auto &card = current.cards[i];
             ImVec2 c;
             float r = 0;
-            if (lockButton(card, v, c, r) && std::hypot(io.MousePos.x - c.x, io.MousePos.y - c.y) <= r + 1) {
+            if (!session.runView && lockButton(card, v, c, r) &&
+                std::hypot(io.MousePos.x - c.x, io.MousePos.y - c.y) <= r + 1) {
                 lockUnder = int(i);
                 under = -1;
                 ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
@@ -1760,10 +1786,15 @@ void drawCanvas(Session &session) {
         if (!visible(card.position, card.size))
             continue;
         const int severity = card.readOnly ? -1 : session.severityAt(card.key.ref);
+        RunStatus status = RunStatus::Idle;
+        bool faded = false;
+        const bool hasStatus = session.runView && cardStatus(session, card.key, status, faded);
         drawCard(session, card, v, draw, m, int(i) == cursorIndex, !card.readOnly && session.selected(card.key.ref),
-                 session.showSearch && cardMatches(card, session.search), severity);
+                 session.showSearch && cardMatches(card, session.search), severity, hasStatus ? int(status) : -1,
+                 faded);
         drawCaret(card, v, draw, session.horizontal, int(i) == caretUnder);
-        drawLockButton(card, v, draw, int(i) == lockUnder);
+        if (!session.runView)
+            drawLockButton(card, v, draw, int(i) == lockUnder);
         // Where a palette node could go: a faint ring on each card that takes it.
         if (fromPalette && !card.readOnly && int(i) != drop.card)
             if (const auto *element = card.element ? card.element : resolve(session.workspace, card.key.ref);

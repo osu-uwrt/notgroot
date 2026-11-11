@@ -1,4 +1,4 @@
-// notgroot [trees directory or tree file] [--theme ID] [--screenshot FILE --frames N] [--no-persist]
+// notgroot [trees directory or tree file] [--run FILE.btlog] [--theme ID] [--screenshot FILE --frames N] [--no-persist]
 #include "app.hpp"
 #include <cstring>
 #include <exception>
@@ -31,11 +31,13 @@ int main(int argc, char **argv) {
             options.keys = value();
         else if (arg == "--type")
             options.text = value();
+        else if (arg == "--run")
+            options.run = value();
         else if (arg == "--no-persist")
             options.persist = false;
         else if (arg == "-h" || arg == "--help") {
-            std::cout << "usage: notgroot [trees directory or tree file] [--theme ID] [--screenshot FILE --frames N] "
-                         "[--no-persist]\n";
+            std::cout << "usage: notgroot [trees directory or tree file] [--run FILE.btlog] [--theme ID] "
+                         "[--screenshot FILE --frames N] [--no-persist]\n";
             return 0;
         } else if (!arg.empty() && arg[0] == '-') {
             std::cerr << "notgroot: unknown option " << arg << '\n';

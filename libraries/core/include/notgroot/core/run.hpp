@@ -128,6 +128,10 @@ class Run {
     int deepestRunning(const RunState &) const;
     // An instance's status in a state (its call node's).
     RunStatus status(const RunState &state, int instance) const;
+    // The node whose status is the instance's: its call (the main tree: its root node).
+    std::uint16_t statusUid(int instance) const {
+        return instance < 0 || std::size_t(instance) >= rootOf_.size() ? 0 : rootOf_[std::size_t(instance)];
+    }
     // The transition at which a subtree fails next, or last before the latest applied one, in a state that has
     // `applied` transitions (-1: none). seekIndex(state, failure + 1) shows it.
     long nextFailure(std::size_t applied) const;

@@ -12,6 +12,7 @@
 namespace notgroot::app {
 struct Options {
     std::filesystem::path open;       // a trees directory or a tree file to open at start
+    std::filesystem::path run;        // --run: a run (.btlog) to show at start
     std::string theme;                // --theme: overrides the preferences for this run
     std::filesystem::path screenshot; // --screenshot: save the frame after `frames` frames, then quit
     int frames = 0;                   // --frames: quit after this many frames (0: run until closed)
@@ -34,6 +35,12 @@ class App {
     void dockspace();
     void defaultLayout(unsigned dock);
     void openWorkspace(const std::filesystem::path &);
+    // Runs (.btlog): each opens in a session of its own, read-only, beside the editor's.
+    void openRun(const std::filesystem::path &);
+    void hostCallbacks(ui::Session &);
+    ui::Session &shown() {
+        return showingRun_ && run_ ? *run_ : session_;
+    }
     void loadWorkspace(const std::filesystem::path &);
     void updateTitle();
     // Quits now, or asks first when trees have unsaved edits.
@@ -55,7 +62,11 @@ class App {
     Options opt_;
     std::unique_ptr<Window> window_;
     ui::Session session_;
-    FilePicker picker_;
+    std::unique_ptr<ui::Session> run_; // the run open, if any
+    bool showingRun_ = false;          // the canvas, inspector and variables show the run
+    int raiseRun_ = 0;        // frames left to bring the Run and Timeline tabs to the front (the first ones dock them)
+    unsigned compared_ = ~0u; // the editor's workspace version the run's trees were compared with
+    FilePicker picker_, runPicker_;
     std::vector<std::string> recent_; // recently opened workspaces
     bool closing_ = false;            // the user agreed to quit
     double lastPoll_ = 0;

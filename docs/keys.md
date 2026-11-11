@@ -125,6 +125,28 @@ it and closes the brace.
 | Ctrl+Q | quit. If there are unsaved changes, it asks first |
 | F1 | this list, in the editor |
 
+## Runs
+
+doTask writes a log of every run to `~/btlogs` (`BTLog_<date>_<time>.btlog`). Open one to see the run on the trees
+as they ran: it opens beside the editor, read-only. The canvas shows one subtree instance at a time, its cards tinted
+with their status at the playhead (amber running, green success, red failure; faded once idle again).
+
+| Key | Does |
+|---|---|
+| Ctrl+Shift+O | open a run (`.btlog`) |
+| F6 | switch the canvas, inspector and variables between the editor and the run |
+| P | play / pause (*canvas*). The Timeline sets the speed |
+| . / , (Period / Comma) | step to the next / previous transition (*canvas*) |
+| ] / [ (RightBracket / LeftBracket) | jump to the next / previous subtree failure (*canvas*) |
+| F | follow: the canvas goes to the deepest subtree running (*canvas*) |
+| Enter (Ctrl+Enter) | go into the subtree call under the cursor (*canvas*) |
+| Backspace | go up to the instance that called this one (*canvas*) |
+| Ctrl+Shift+Enter | show the cursor's node in the editor (when its tree hasn't changed since the run) |
+
+Space still opens a call in place, showing that call's own instance. In the Run panel, click an instance to show it
+and double-click to move the playhead to when it started. In the Timeline, click or drag the bar or a lane to move
+the playhead, the wheel zooms, a right drag pans, and a double-click on the bar shows the whole run.
+
 ## Mouse
 
 | Mouse | Does |

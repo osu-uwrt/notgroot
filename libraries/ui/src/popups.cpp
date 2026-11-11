@@ -146,7 +146,7 @@ void drawFinder(Session &session) {
     static std::string query;
     static int selected = 0;
     static std::vector<Target> all;
-    static unsigned builtFor = ~0u;
+    static std::pair<const Session *, unsigned> builtFor{nullptr, ~0u};
     if (!session.showFinder) {
         wasOpen = false;
         return;
@@ -157,8 +157,8 @@ void drawFinder(Session &session) {
         query = session.finderPrefix;
         selected = 0;
     }
-    if (builtFor != session.workspace.version() || opening) {
-        builtFor = session.workspace.version();
+    if (builtFor != std::make_pair<const Session *, unsigned>(&session, session.workspace.version()) || opening) {
+        builtFor = {&session, session.workspace.version()};
         all.clear();
         for (const auto &key : session.workspace.missions())
             all.push_back({Target::Tree, {key, "mission", "", rootColor(), 40}, key, "", "", {}});
@@ -726,7 +726,7 @@ void drawShortcuts(Session &session) {
         sectionTitle("Canvas");
         table("##canvas", rows);
     }
-    for (const char *group : {"File", "Edit", "Select", "Node", "Tree", "View", "Help"}) {
+    for (const char *group : {"File", "Edit", "Select", "Node", "Tree", "Run", "View", "Help"}) {
         rows.clear();
         for (const auto &c : session.commands)
             if (c.group == group && c.chord && !Session::alias(c) && shown(chordName(c.chord), c.label))

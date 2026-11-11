@@ -434,16 +434,21 @@ void drawVariables(Session &session) {
                 keyCell(*key);
                 ImGui::TableNextColumn();
                 ImGui::SetNextItemWidth(-FLT_MIN);
-                globalValueField(session, session.active, key->name, key->value, usable);
+                if (session.workspace.readOnly())
+                    ImGui::TextUnformatted(key->value.c_str());
+                else
+                    globalValueField(session, session.active, key->name, key->value, usable);
                 if (ImGui::IsItemHovered() && key->uses.empty())
                     ImGui::SetTooltip("Not read anywhere yet");
                 ImGui::TableNextColumn();
-                removeGlobalButton(session, session.active, key->name);
+                if (!session.workspace.readOnly())
+                    removeGlobalButton(session, session.active, key->name);
                 ImGui::PopID();
             }
             ImGui::EndTable();
         }
-        newGlobalFields(session, session.active, usable, ui(130));
+        if (!session.workspace.readOnly())
+            newGlobalFields(session, session.active, usable, ui(130));
     }
 
     // Locals: keys bound while the tree runs (a node's {key}, a setter, a script).

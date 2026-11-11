@@ -17,6 +17,8 @@
 #include <vector>
 
 namespace notgroot::ui {
+struct RunView; // run_view.hpp
+
 // A card on the canvas: a node, or (for a subtree opened in place) a node of that subtree reached through a call.
 struct CardKey {
     core::NodeRef ref;                   // the node itself (in its own tree)
@@ -70,6 +72,8 @@ class Session {
 
     // --- workspace ---
     bool open(const std::filesystem::path &, std::string &error);
+    // Opens trees from text, read-only (a run's: run_view.hpp); `name` stands in for a file.
+    bool openText(const std::filesystem::path &name, const std::string &text, std::string &error);
     bool loadBuiltinModels(const std::filesystem::path &, std::string &error);
     void save();
     void confirmThen(std::function<void()> action); // runs it now, or after the unsaved-changes dialog
@@ -101,9 +105,10 @@ class Session {
     std::vector<core::NodeRef> allNodes() const;
     // The nodes an edit applies to: the selection, else the cursor (when it is editable).
     std::vector<core::NodeRef> targets() const;
-    // A card that can't be edited here: shown in place from a subtree that is locked (as subtrees start).
+    // A card that can't be edited here: shown in place from a subtree that is locked (as subtrees start), or any card
+    // of a run.
     bool readOnly(const CardKey &key) const {
-        return key.inside() && !unlocked(key.ref.tree);
+        return workspace.readOnly() || (key.inside() && !unlocked(key.ref.tree));
     }
     bool unlocked(const std::string &subtree) const;
     // Locks or unlocks a subtree opened in place, in the active tree's view.
@@ -210,11 +215,23 @@ class Session {
     std::function<void()> quit;   // set by the host
     std::function<void()> browse; // File > Open: set by the host (a desktop dialog)
 
+    // --- viewing a run (run_view.hpp) ---
+    // The run this session shows (its workspace is the run's trees, read-only); null in the editor.
+    std::shared_ptr<RunView> runView;
+    // Makes this session show a run: its commands become the viewer's (nothing that edits, plus the Run group).
+    void attachRun(std::shared_ptr<RunView>);
+    // Set by the host, in the editor and the run alike.
+    std::function<void()> browseRun;                       // File > Open run… (a desktop dialog)
+    std::function<void()> switchView;                      // between the editor and the run
+    std::function<void()> closeRun;                        // closes the run
+    std::function<void(const core::NodeRef &)> showSource; // a run's node in the editor
+
     // Copy of a model (pointers into the catalog die with the next edit).
     bool model(const std::string &id, core::NodeModel &out) const;
 
   private:
     void registerCommands();
+    void reset(); // nothing open in a view
     void validateCursor();
     std::map<std::string, ViewState> views_;
     std::unique_ptr<core::BtCheck> check_;

@@ -1,6 +1,7 @@
 // App: window, menus, dockspace and preferences around the editor panels.
 #include "app.hpp"
 #include "notgroot/ui/panels.hpp"
+#include "notgroot/ui/run_view.hpp"
 #include "notgroot/ui/style.hpp"
 #include "notgroot/ui/theme.hpp"
 #include <GL/glew.h>
@@ -73,7 +74,7 @@ App::App(Options options) : opt_(std::move(options)) {
     std::string error;
     if (!session_.loadBuiltinModels(content_ / "builtin_models.xml", error))
         std::cerr << "notgroot: " << error << '\n';
-    session_.quit = [this] { quit(); };
+    hostCallbacks(session_);
     session_.setChecker(fs::exists(NOTGROOT_CHECK) ? fs::path(NOTGROOT_CHECK) : fs::path(NOTGROOT_INSTALLED_CHECK));
     session_.browse = [this] {
         const auto start = session_.workspace.isOpen() ? session_.workspace.directory() : fs::path();
@@ -81,6 +82,7 @@ App::App(Options options) : opt_(std::move(options)) {
             session_.status(picker_.hint(), true);
     };
     picker_.setParent(0);
+    runPicker_.setParent(0);
     session_.horizontal = preference("layout") == "left-right";
     if (!config_.empty() && fs::exists(config_ / "notgroot.yaml"))
         try {
@@ -93,11 +95,64 @@ App::App(Options options) : opt_(std::move(options)) {
         openWorkspace(opt_.open);
     else if (!recent_.empty())
         openWorkspace(recent_.front());
+    if (!opt_.run.empty())
+        openRun(opt_.run);
 
     // The getting-started tour on the first start (never in a --no-persist run: screenshots stay as asked).
     session_.tourDone = [this] { savePreference("tour_seen", "yes"); };
     if (!config_.empty() && preference("tour_seen").empty())
         session_.showTour = true;
+}
+
+// What a session asks of the host: the editor's and a run's alike.
+void App::hostCallbacks(ui::Session &session) {
+    session.quit = [this] { quit(); };
+    session.browseRun = [this] {
+        const char *home = std::getenv("HOME");
+        const auto start = home && fs::is_directory(fs::path(home) / "btlogs") ? fs::path(home) / "btlogs" : fs::path();
+        if (!runPicker_.open("Open a run", start, "BehaviorTree.CPP logs", {"*.btlog"}))
+            shown().status(runPicker_.hint(), true);
+    };
+    session.switchView = [this] {
+        if (run_)
+            showingRun_ = !showingRun_;
+        else
+            shown().status("No run open: Run > Open run (Ctrl+Shift+O)", true);
+    };
+    session.closeRun = [this] {
+        run_.reset();
+        showingRun_ = false;
+    };
+    session.showSource = [this](const core::NodeRef &ref) {
+        if (!run_)
+            return;
+        const auto source = ui::sourceRef(run_->workspace, session_.workspace, *run_->runView, ref);
+        if (source.empty()) {
+            run_->status(ref.tree == run_->runView->run.mainTree()
+                             ? "The mission's own tree has no file name in a run"
+                             : ref.tree + " changed since this run, or isn't open "
+                                          "in the editor",
+                         true);
+            return;
+        }
+        showingRun_ = false;
+        session_.reveal(source);
+    };
+}
+
+void App::openRun(const fs::path &path) {
+    auto session = std::make_unique<ui::Session>();
+    std::string error;
+    if (!session->loadBuiltinModels(content_ / "builtin_models.xml", error) || !ui::openRun(*session, path, error)) {
+        shown().status(error, true);
+        return;
+    }
+    hostCallbacks(*session);
+    session->horizontal = session_.horizontal;
+    run_ = std::move(session);
+    showingRun_ = true;
+    raiseRun_ = 6;
+    compared_ = ~0u;
 }
 
 void App::openWorkspace(const fs::path &path) {
@@ -141,7 +196,9 @@ void App::quit() {
 
 void App::updateTitle() {
     std::string title = "notgroot";
-    if (session_.workspace.isOpen())
+    if (showingRun_ && run_)
+        title = "RUN " + run_->runView->title + " — notgroot";
+    else if (session_.workspace.isOpen())
         title = (session_.dirty() ? "• " : "") + session_.workspace.directory().string() +
                 (session_.active.empty() ? "" : " — " + session_.active) + " — notgroot";
     if (title != title_) {
@@ -377,6 +434,16 @@ void App::frame() {
     // Files picked in the desktop dialog, and files changed on disk (checked once a second).
     if (auto picked = picker_.take())
         openWorkspace(*picked);
+    if (auto picked = runPicker_.take())
+        openRun(*picked);
+    // A run: compared with the editor's trees whenever they change, and played on.
+    if (run_ && compared_ != session_.workspace.version()) {
+        compared_ = session_.workspace.version();
+        ui::compareTrees(*run_->runView, run_->workspace, session_.workspace);
+    }
+    const bool playing = run_ && ui::advanceRun(*run_, double(ImGui::GetIO().DeltaTime));
+    if (opt_.screenshot.empty())
+        window_->setIdleWait(playing ? 0 : 0.5);
     if (ImGui::GetTime() - lastPoll_ > 1) {
         lastPoll_ = ImGui::GetTime();
         session_.pollDisk();
@@ -387,9 +454,34 @@ void App::frame() {
     menuBar();
     statusBar();
     dockspace();
+    // A run just opened: its tabs in front, one a frame (a dock node selects the tab of the window last focused),
+    // once the layout has settled; then the canvas takes the keys.
+    if (raiseRun_ > 0) {
+        --raiseRun_;
+        if (raiseRun_ < 3)
+            ImGui::SetWindowFocus(raiseRun_ == 2 ? "Run" : raiseRun_ == 1 ? "Timeline" : "Canvas");
+    }
     const auto panel = [&](const char *name, void (*draw)(ui::Session &), ImGuiWindowFlags flags = 0) {
         if (ImGui::Begin(name, nullptr, flags))
             draw(session_);
+        ImGui::End();
+    };
+    // These show the run while it is shown.
+    const auto shownPanel = [&](const char *name, void (*draw)(ui::Session &)) {
+        if (ImGui::Begin(name, nullptr))
+            draw(shown());
+        ImGui::End();
+    };
+    const auto runPanel = [&](const char *name, void (*draw)(ui::Session &)) {
+        if (ImGui::Begin(name, nullptr)) {
+            if (run_)
+                draw(*run_);
+            else {
+                ui::emptyState("No run open. Open a .btlog (Ctrl+Shift+O): doTask writes one per run to ~/btlogs.");
+                if (ImGui::Button("Open run…"))
+                    session_.run("run.open");
+            }
+        }
         ImGui::End();
     };
     panel("Trees", ui::drawExplorer);
@@ -398,22 +490,25 @@ void App::frame() {
     const bool canvas =
         ImGui::Begin("Canvas", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar();
+    session_.canvasFocused = false;
+    if (run_)
+        run_->canvasFocused = false;
     if (canvas)
-        ui::drawCanvas(session_);
-    else
-        session_.canvasFocused = false;
+        ui::drawCanvas(shown());
     ImGui::End();
-    panel("Inspector", ui::drawInspector);
-    panel("Variables", ui::drawVariables);
+    shownPanel("Inspector", ui::drawInspector);
+    shownPanel("Variables", ui::drawVariables);
     panel("Problems", ui::drawProblems);
+    runPanel("Run", ui::drawRunPanel);
+    runPanel("Timeline", ui::drawTimeline);
 
-    ui::drawFinder(session_);
-    ui::drawPicker(session_);
+    ui::drawFinder(shown());
+    ui::drawPicker(shown());
     ui::drawDialogs(session_);
-    ui::drawShortcuts(session_);
+    ui::drawShortcuts(shown());
     ui::drawTour(session_);
     aboutWindow();
-    ui::handleShortcuts(session_);
+    ui::handleShortcuts(shown());
     updateTitle();
 }
 
@@ -431,10 +526,12 @@ void App::defaultLayout(unsigned dock) {
     const ImGuiID rightBottom = ImGui::DockBuilderSplitNode(rightTop, ImGuiDir_Down, .42f, nullptr, &rightTop);
     ImGui::DockBuilderDockWindow("Trees", left);
     ImGui::DockBuilderDockWindow("Palette", left);
+    ImGui::DockBuilderDockWindow("Run", left);
     ImGui::DockBuilderDockWindow("Canvas", center);
     ImGui::DockBuilderDockWindow("Inspector", rightTop);
     ImGui::DockBuilderDockWindow("Variables", rightBottom);
     ImGui::DockBuilderDockWindow("Problems", bottom);
+    ImGui::DockBuilderDockWindow("Timeline", bottom);
     ImGui::DockBuilderFinish(dock);
 }
 
@@ -469,10 +566,14 @@ void App::statusBar() {
         return;
     }
     if (ImGui::BeginMenuBar()) {
-        const bool fresh = ImGui::GetTime() - session_.statusTime < 8;
-        if (fresh && !session_.statusText.empty())
-            ImGui::TextColored(session_.statusError ? ui::palette().error : ui::palette().text, "%s",
-                               session_.statusText.c_str());
+        const auto &said = App::shown();
+        const bool fresh = ImGui::GetTime() - said.statusTime < 8;
+        if (fresh && !said.statusText.empty())
+            ImGui::TextColored(said.statusError ? ui::palette().error : ui::palette().text, "%s",
+                               said.statusText.c_str());
+        else if (&said != &session_)
+            ImGui::TextDisabled("P play · , . step · [ ] failures · F follow · Enter into subtree · Backspace up · "
+                                "F6 editor");
         else
             ImGui::TextDisabled("Ctrl+P find · Ctrl+Shift+P commands · Tab add child · Enter edit · Space fold / "
                                 "open subtree · F8 next problem");
@@ -506,7 +607,7 @@ void App::menuBar() {
         return;
     }
     const auto commands = [&](const char *group) {
-        for (const auto &command : session_.commands)
+        for (const auto &command : shown().commands)
             if (command.group == group && !ui::Session::alias(command) &&
                 ImGui::MenuItem(command.label.c_str(), ui::chordName(command.chord).c_str(), false,
                                 !command.enabled || command.enabled()))
@@ -522,7 +623,7 @@ void App::menuBar() {
         }
         ImGui::EndMenu();
     }
-    for (const char *group : {"Edit", "Select", "Node", "Tree"})
+    for (const char *group : {"Edit", "Select", "Node", "Tree", "Run"})
         if (ImGui::BeginMenu(group)) {
             commands(group);
             ImGui::EndMenu();

@@ -1,5 +1,6 @@
 // Session: shared editor state and the commands.
 #include "notgroot/ui/session.hpp"
+#include "notgroot/ui/run_view.hpp"
 #include "notgroot/ui/style.hpp"
 #include "notgroot/ui/theme.hpp"
 #include <algorithm>
@@ -13,13 +14,17 @@ Session::Session() {
     registerCommands();
 }
 
+void Session::attachRun(std::shared_ptr<RunView> view) {
+    runView = std::move(view);
+    commands.clear();
+    registerCommands();
+}
+
 bool Session::loadBuiltinModels(const std::filesystem::path &file, std::string &error) {
     return workspace.loadBuiltinModels(file, error);
 }
 
-bool Session::open(const std::filesystem::path &path, std::string &error) {
-    if (!workspace.open(path, error))
-        return false;
+void Session::reset() {
     history.clear();
     tabs.clear();
     views_.clear();
@@ -28,6 +33,19 @@ bool Session::open(const std::filesystem::path &path, std::string &error) {
     selection.clear();
     highlightKey.clear();
     conflicts.clear();
+}
+
+bool Session::openText(const std::filesystem::path &name, const std::string &text, std::string &error) {
+    if (!workspace.openText(name, text, error))
+        return false;
+    reset();
+    return true;
+}
+
+bool Session::open(const std::filesystem::path &path, std::string &error) {
+    if (!workspace.open(path, error))
+        return false;
+    reset();
     // Open the file asked for, else the first mission.
     std::string first;
     for (const auto &[key, entry] : workspace.trees())
@@ -515,7 +533,19 @@ void Session::registerCommands() {
     const auto open = [this] { return workspace.isOpen(); };
     const auto onTree = [this] { return workspace.isOpen() && !active.empty(); };
     const auto onNode = [this] { return !targets().empty(); };
-    const auto add = [this](Command c) { commands.push_back(std::move(c)); };
+    // A run's trees are read-only: its session leaves out every command that edits, and Enter and Backspace go in
+    // and out of subtrees instead.
+    const auto edits = [](const std::string &id) {
+        static const std::set<std::string> kept = {"edit.copy", "node.definition", "tree.lock"};
+        if (kept.count(id))
+            return false;
+        return id.rfind("edit.", 0) == 0 || id.rfind("node.", 0) == 0 || id.rfind("tree.", 0) == 0 ||
+               id == "key.rename" || id == "file.save" || id == "file.check";
+    };
+    const auto add = [this, edits](Command c) {
+        if (!(runView && edits(c.id)))
+            commands.push_back(std::move(c));
+    };
     // What the node menu and the finder offer depends on the cursor's node.
     const auto at = [this]() -> Element * { return cursor.ref.empty() ? nullptr : resolve(workspace, cursor.ref); };
     const auto onEditable = [this] { return !cursor.ref.empty() && !cursor.ref.isTree() && !readOnly(cursor); };
@@ -721,7 +751,16 @@ void Session::registerCommands() {
     add({"node.definition", "Open the subtree's definition", "Node", ImGuiMod_Ctrl | ImGuiKey_Enter, true,
          [this] {
              auto *element = resolve(workspace, cursor.ref);
-             if (element && isSubTree(*element) && workspace.tree(element->get("ID")))
+             if (runView) {
+                 const int into =
+                     element && isSubTree(*element)
+                         ? runView->run.calledBy(runView->run.uidAt(cardInstance(*this, cursor), cursor.ref.path))
+                         : cardInstance(*this, cursor);
+                 if (into >= 0)
+                     focusFrame(*this, into);
+                 else
+                     status("Not a subtree call", true);
+             } else if (element && isSubTree(*element) && workspace.tree(element->get("ID")))
                  openTree(element->get("ID"));
              else if (!cursor.origin.empty())
                  reveal(cursor.ref);
@@ -869,5 +908,64 @@ void Session::registerCommands() {
                  openTree(*(found == tabs.begin() ? tabs.end() - 1 : found - 1));
          },
          onTree});
+
+    // Run: opening one (here and in the editor), then playing it (in its own session).
+    const auto host = [](const std::function<void()> &f) {
+        return [&f] {
+            if (f)
+                f();
+        };
+    };
+    add({"run.open", "Open run (.btlog)…", "Run", ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_O, false, host(browseRun),
+         nullptr});
+    add({"run.switch", "Switch between the editor and the run", "Run", ImGuiKey_F6, false, host(switchView), nullptr});
+    if (!runView)
+        return;
+    auto &view = *runView;
+    add({"run.close", "Close the run", "Run", 0, false, host(closeRun), nullptr});
+    add({"run.play", "Play / pause", "Run", ImGuiKey_P, true,
+         [this, &view] {
+             if (!view.playing && view.state.applied >= view.run.transitions().size())
+                 seekTransitions(*this, 0);
+             view.playing = !view.playing;
+         },
+         nullptr});
+    add({"run.follow", "Follow what runs", "Run", ImGuiKey_F, true, [&view] { view.follow = !view.follow; }, nullptr});
+    add({"run.next", "Step to the next transition", "Run", ImGuiKey_Period, true,
+         [this, &view] { seekTransitions(*this, view.state.applied + 1); }, nullptr});
+    add({"run.previous", "Step back a transition", "Run", ImGuiKey_Comma, true,
+         [this, &view] { seekTransitions(*this, view.state.applied ? view.state.applied - 1 : 0); }, nullptr});
+    add({"run.nextFailure", "Next subtree failure", "Run", ImGuiKey_RightBracket, true,
+         [this, &view] {
+             const long at = view.run.nextFailure(view.state.applied);
+             if (at < 0)
+                 status("No failure after this", true);
+             else
+                 seekTransitions(*this, std::size_t(at) + 1);
+         },
+         nullptr});
+    add({"run.previousFailure", "Previous subtree failure", "Run", ImGuiKey_LeftBracket, true,
+         [this, &view] {
+             const long at = view.run.previousFailure(view.state.applied);
+             if (at < 0)
+                 status("No failure before this", true);
+             else
+                 seekTransitions(*this, std::size_t(at) + 1);
+         },
+         nullptr});
+    add({"run.into", "Go into the subtree", "Run", ImGuiKey_Enter, true, [this] { run("node.definition"); }, nullptr});
+    add({"run.up", "Go up to the caller", "Run", ImGuiKey_Backspace, true,
+         [this, &view] {
+             const int parent = view.run.instances()[std::size_t(view.frame)].parent;
+             if (parent >= 0)
+                 focusFrame(*this, parent);
+         },
+         [&view] { return view.run.instances()[std::size_t(view.frame)].parent >= 0; }});
+    add({"run.source", "Show the node in the editor", "Run", ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Enter, true,
+         [this] {
+             if (showSource)
+                 showSource(cursor.ref);
+         },
+         [this] { return !cursor.ref.empty(); }});
 }
 } // namespace notgroot::ui
