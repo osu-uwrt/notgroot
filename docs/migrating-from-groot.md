@@ -31,7 +31,7 @@ is in [keys.md](keys.md) (F1 in the editor).
 | Edit ports in the node box | Double-click a port's row to edit it on the card (a node's title names it), or use the Inspector (Enter on a node). The `{}` button switches a value between text and key |
 | Expand a subtree in place | Space, or the round button under the call. It starts locked (grayed); the padlock on the call's corner or Ctrl+U unlocks it to edit there, globals included. Ctrl+Enter opens it in its own tab |
 | Save rewrites the file from Groot's model | Saves only the files you changed, in one canonical format. Comments and attribute order are kept, and an unchanged file keeps its bytes |
-| Monitor and log replay modes | Not in notgroot. `doTask` can publish to Groot2 (below) |
+| Log replay | Open a `doTask` log (`.btlog`, Ctrl+Shift+O). It opens read-only beside the editor: one subtree instance at a time, a call stack of instances and a timeline. There is no live monitor yet (below) |
 
 notgroot writes nothing into the XML of its own except `<!-- notgroot:… -->` comments (a subtree's color, the
 globals marker). BehaviorTree.CPP ignores them; keep them when you hand-edit.
@@ -195,5 +195,9 @@ alike (up to about 20 keys in every theme; the biggest trees have around 47, whe
 - In riptide_autonomy, `ros2 run riptide_autonomy2 updateNodeModels --check` fails when `node_models.xml` is out of
   date or a subtree port has a default. `TestTreesLoad` loads every mission with the real plugins.
 - `doTask` lists missions only (`list_trees`), never `lib/`, and logs each tree's load time.
+- **Replays:** `doTask` writes `~/btlogs/BTLog_<date>_<time>.btlog` for every run. Open one in notgroot (Run > Open
+  run, or `notgroot --run FILE`). The log holds the tree as it ran, so it opens without the trees folder of that day;
+  subtrees that have changed since are flagged, and the rest open in the editor with Ctrl+Shift+Enter. bt3's `.fbl`
+  logs are a different format (Groot1's) and don't open.
 - **Live view:** notgroot has none yet. Set `doTask`'s `enable_groot2` parameter to `true` (port `groot2_port`,
   default 1667) and attach Groot2 to watch a run. This has been checked to start, not yet with Groot2 attached.

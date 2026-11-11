@@ -23,7 +23,7 @@ build/release/app/notgroot ~/osu-uwrt/development/software/src/riptide_autonomy/
 - **What opens:** notgroot opens a trees folder, a file inside one, or a single loose tree file. Without an argument,
   it reopens the last folder.
 - **Tests:** `ctest --preset dev` (after `./build.sh dev`). The tests include a round trip of the real trees when
-  `NOTGROOT_TREES_DIR` is set.
+  `NOTGROOT_TREES_DIR` is set, and read every run log in `NOTGROOT_RUNS_DIR` (else `~/btlogs`).
 
 ## What it edits
 
@@ -104,6 +104,16 @@ saving writes only the files you changed. Includes are recomputed on save, so yo
   many files it touches.
 - **Disk.** A file changed on disk reloads by itself. If it also has unsaved edits, notgroot asks which version to
   keep.
+- **Runs.** doTask logs every run to `~/btlogs` (`.btlog`). Open one (Ctrl+Shift+O, or `notgroot --run FILE`) and it
+  opens read-only beside the editor, on the trees as they ran (the log carries them), like a debugger:
+  - The canvas shows one subtree instance at a time, each card tinted with its status at the playhead: amber running,
+    green success, red failure, faded once idle again. Enter goes into a call's instance, Backspace back up, and F6
+    switches between the run and the editor.
+  - The **Run** panel lists the instances as a call stack (those that ran, those that failed, or all), with their time
+    and failures, and the cursor node's changes.
+  - The **Timeline** plays at any speed, steps through transitions, jumps between subtree failures, and has a lane per
+    caller and call. **Follow** keeps the canvas on the deepest subtree running.
+  - Subtrees that changed since the run are flagged; nodes of the rest open in the editor (Ctrl+Shift+Enter).
 
 [docs/keys.md](docs/keys.md) lists every key and mouse action; F1 shows the same list in the editor. The status bar shows
 the main ones, and Ctrl+Shift+P lists every command.
@@ -112,8 +122,8 @@ the main ones, and Ctrl+Shift+P lists every command.
 
 | Path | What |
 |---|---|
-| `libraries/core` | no UI: lossless XML and the canonical writer, node models, the workspace, undo, edits and refactors, variables, validation, layout, fuzzy search, the BehaviorTree.CPP check runner |
-| `libraries/ui` | the panels (ImGui): canvas, inspector, variables, problems, finder, picker, dialogs; the theme loader is Nereus's |
+| `libraries/core` | no UI: lossless XML and the canonical writer, node models, the workspace, undo, edits and refactors, variables, validation, layout, fuzzy search, the BehaviorTree.CPP check runner, runs (`.btlog`) |
+| `libraries/ui` | the panels (ImGui): canvas, inspector, variables, problems, finder, picker, dialogs, the run view; the theme loader is Nereus's |
 | `app` | the window, menus, dock layout and preferences (`~/.config/notgroot/notgroot.yaml`) |
 | `tools/check` | `notgroot-check` (BehaviorTree.CPP 4.10 with placeholder nodes) |
 | `tests` | GTest suites, including headless ImGui frames driven by key presses |

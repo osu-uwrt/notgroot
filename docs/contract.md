@@ -133,8 +133,11 @@ BT.CPP ignores comments; riptide_autonomy tools must keep them.
   as a placeholder node with its ports, and the saved missions are loaded with `createTreeFromFile`. A file that
   loads there loads in `doTask`, apart from what only the plugins can check.
 
-## 8. Runtime (reserved, not used by notgroot v1)
+## 8. Runtime
 
 - `doTask` parameters `enable_groot2` (bool, default `false`) and `groot2_port` (int, default `1667`) attach a
   `BT::Groot2Publisher` to each tree it runs, so a future live view can attach.
 - Each goal logs its load time split into parse, instantiate and ROS init.
+- Each goal writes a BehaviorTree.CPP `FileLogger2` log, `<log_file_dir>/BTLog_<date>_<time>.btlog` (default
+  `~/btlogs`), which notgroot replays. Its header is the instantiated tree (one `<BehaviorTree>` per subtree
+  instance, `_uid` on every node, `_fullpath` on instances and calls), so a log is read without the trees folder.
