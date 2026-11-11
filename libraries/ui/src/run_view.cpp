@@ -19,16 +19,37 @@ const RunInstance &instanceAt(const RunView &view, int i) {
     return view.run.instances()[std::size_t(i)];
 }
 
-// "m:ss.s", or "h:mm:ss" for long runs.
-std::string clockText(std::int64_t usec) {
+// "m:ss.s", or "h:mm:ss" for long runs; with a ruler's step, as many decimals as it needs.
+std::string clockText(std::int64_t usec, std::int64_t step = 100000) {
     const double seconds = double(std::max<std::int64_t>(usec, 0)) / 1e6;
+    const int decimals = step >= 1000000 ? 0 : step >= 100000 ? 1 : step >= 10000 ? 2 : 3;
     char text[32];
     if (seconds >= 3600)
         std::snprintf(text, sizeof(text), "%d:%02d:%02d", int(seconds / 3600), int(seconds / 60) % 60,
                       int(seconds) % 60);
     else
-        std::snprintf(text, sizeof(text), "%d:%04.1f", int(seconds / 60), std::fmod(seconds, 60.));
+        std::snprintf(text, sizeof(text), "%d:%0*.*f", int(seconds / 60), decimals ? decimals + 3 : 2, decimals,
+                      std::floor(std::fmod(seconds, 60.) * std::pow(10., decimals)) / std::pow(10., decimals));
     return text;
+}
+
+// Shows the Timeline from `from` to `to`, kept inside the run and no shorter than a millisecond.
+void showSpan(RunView &view, std::int64_t from, std::int64_t to) {
+    const auto duration = std::max<std::int64_t>(view.run.duration(), 1);
+    const auto length = std::clamp<std::int64_t>(to - from, std::min<std::int64_t>(1000, duration), duration);
+    view.shownFrom = std::clamp<std::int64_t>(from, 0, duration - length);
+    view.shownTo = view.shownFrom + length;
+}
+
+// A round step between ruler marks, at least `gap` pixels apart.
+std::int64_t rulerStep(double span, float width, float gap) {
+    static const std::int64_t steps[] = {1000,     2000,     5000,      10000,     20000,     50000,     100000,
+                                         200000,   500000,   1000000,   2000000,   5000000,   10000000,  15000000,
+                                         30000000, 60000000, 120000000, 300000000, 600000000, 900000000, 1800000000};
+    for (const auto step : steps)
+        if (double(step) / span * width >= gap)
+            return step;
+    return 3600000000;
 }
 
 // After the playhead moves: the canvas follows the deepest running instance, if asked to.
@@ -511,9 +532,30 @@ void drawTimeline(Session &session) {
     ImGui::SameLine();
     ImGui::TextDisabled("transition %zu of %zu", view.state.applied, run.transitions().size());
 
-    // The span shown: wheel zooms at the mouse, a right drag pans, double-click shows it all.
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Fit"))
+        view.shownFrom = view.shownTo = 0;
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Show the whole run (double-click the bar)");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Frame") && run.ran(view.frame)) {
+        const auto &spans = run.spans(view.frame);
+        const auto last = spans.back().end < 0 ? run.duration() : spans.back().end;
+        const auto pad = std::max<std::int64_t>((last - spans.front().start) / 20, 1000);
+        showSpan(view, spans.front().start - pad, last + pad);
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Zoom to when the subtree on the canvas ran");
+
+    // The span shown, moved as the canvas is: Ctrl+wheel or a pinch zooms at the pointer, Shift+wheel (or a sideways
+    // swipe) and dragging the lanes pan, the wheel scrolls the lanes, Shift+drag zooms to a range.
     if (view.shownTo <= view.shownFrom)
         view.shownFrom = 0, view.shownTo = duration;
+    // Playing past the edge of a zoomed span pages it along.
+    if (view.playing && (view.clock > view.shownTo || view.clock < view.shownFrom)) {
+        const auto length = view.shownTo - view.shownFrom;
+        showSpan(view, view.clock - length / 10, view.clock - length / 10 + length);
+    }
     const float labelWidth = ui(170);
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float width = std::max(ImGui::GetContentRegionAvail().x - labelWidth, ui(40));
@@ -521,19 +563,27 @@ void drawTimeline(Session &session) {
     const auto span = double(view.shownTo - view.shownFrom);
     const auto xOf = [&](std::int64_t t) { return laneX + float(double(t - view.shownFrom) / span * width); };
     const auto timeAt = [&](float x) { return view.shownFrom + std::int64_t(double(x - laneX) / width * span); };
+    const auto seekAt = [&](float x) { seekTime(session, std::clamp(timeAt(x), std::int64_t(0), run.duration())); };
     auto *draw = ImGui::GetWindowDrawList();
     const auto &io = ImGui::GetIO();
+    const float bottom = ImGui::GetWindowPos().y + ImGui::GetWindowHeight();
 
-    // Scrub bar: failures as ticks, the playhead.
-    const float barHeight = ui(18);
+    // Scrub bar: a ruler, failures as ticks. Clicking or dragging moves the playhead; playing goes on from there
+    // (held while dragging). Double-click shows the whole run.
+    const float barHeight = ui(20);
     ImGui::SetCursorScreenPos({laneX, origin.y});
     ImGui::InvisibleButton("##scrub", {width, barHeight});
     const bool barHovered = ImGui::IsItemHovered();
-    // Clicking or dragging moves the playhead; playing goes on from there (held while dragging).
     if (ImGui::IsItemActive())
-        seekTime(session, std::clamp(timeAt(io.MousePos.x), std::int64_t(0), run.duration()));
+        seekAt(io.MousePos.x);
+    if (barHovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+        view.shownFrom = view.shownTo = 0;
     draw->AddRectFilled({laneX, origin.y}, {laneX + width, origin.y + barHeight},
                         ImGui::GetColorU32(ImGui::GetStyle().Colors[ImGuiCol_FrameBg]), ui(3));
+    const auto step = rulerStep(span, width, ui(90));
+    draw->PushClipRect({laneX, origin.y}, {laneX + width, bottom}, true);
+    for (auto t = (view.shownFrom / step + 1) * step; t < view.shownTo; t += step)
+        draw->AddLine({xOf(t), origin.y}, {xOf(t), bottom}, ImGui::GetColorU32(withAlpha(palette().muted, .15f)));
     for (long at = run.nextFailure(0); at >= 0; at = run.nextFailure(std::size_t(at) + 1)) {
         const auto t = run.transitions()[std::size_t(at)].usec;
         if (t < view.shownFrom || t > view.shownTo)
@@ -542,9 +592,19 @@ void drawTimeline(Session &session) {
         draw->AddLine({x, origin.y + ui(3)}, {x, origin.y + barHeight - ui(3)}, ImGui::GetColorU32(palette().error),
                       ui(1.5f));
     }
+    // The ruler's times over the failures, each on a patch of the bar.
+    for (auto t = (view.shownFrom / step + 1) * step; t < view.shownTo; t += step) {
+        const auto label = clockText(t, step);
+        const ImVec2 at{xOf(t) + ui(3), origin.y + (barHeight - ImGui::GetTextLineHeight()) / 2};
+        draw->AddRectFilled({at.x - ui(2), origin.y + ui(2)},
+                            {at.x + ImGui::CalcTextSize(label.c_str()).x + ui(2), origin.y + barHeight - ui(2)},
+                            ImGui::GetColorU32(ImGui::GetStyle().Colors[ImGuiCol_FrameBg]), ui(2));
+        draw->AddText(at, ImGui::GetColorU32(withAlpha(palette().muted, .9f)), label.c_str());
+    }
+    draw->PopClipRect();
     draw->AddText({origin.x, origin.y + (barHeight - ImGui::GetTextLineHeight()) / 2},
                   ImGui::GetColorU32(palette().muted),
-                  (clockText(view.shownFrom) + " – " + clockText(view.shownTo)).c_str());
+                  (clockText(view.shownFrom, step) + " – " + clockText(view.shownTo, step)).c_str());
 
     // Lanes: the frame's callers, the frame, then what it called that ran.
     std::vector<int> lanes;
@@ -556,62 +616,109 @@ void drawTimeline(Session &session) {
             lanes.push_back(child);
     const float laneHeight = ImGui::GetTextLineHeight() + ui(4);
     ImGui::SetCursorScreenPos({origin.x, origin.y + barHeight + ui(4)});
-    ImGui::BeginChild("##lanes", {0, 0}, false);
+    ImGui::BeginChild("##lanes", {0, 0}, false, ImGuiWindowFlags_NoScrollWithMouse);
     auto *lanesDraw = ImGui::GetWindowDrawList();
-    const float top = ImGui::GetCursorScreenPos().y;
+    const float top = ImGui::GetCursorScreenPos().y; // the first lane, scrolled
+    const float shownHeight = ImGui::GetWindowHeight();
     for (std::size_t n = 0; n < lanes.size(); ++n) {
         const int i = lanes[n];
-        const float y = top + float(n) * laneHeight - ImGui::GetScrollY();
+        const float y = top + float(n) * laneHeight;
         ImGui::SetCursorScreenPos({origin.x, y});
         ImGui::PushID(int(n));
         std::string label = std::string(n > callers - 1 ? "  " : "") + instanceAt(view, i).label;
         if (ImGui::Selectable(label.c_str(), i == view.frame, 0, {labelWidth - ui(6), laneHeight - ui(2)}))
             focusFrame(session, i);
         ImGui::PopID();
+        lanesDraw->PushClipRect({laneX, y}, {laneX + width, y + laneHeight}, true);
         for (const auto &s : run.spans(i)) {
             const auto end = s.end < 0 ? run.duration() : s.end;
             if (end < view.shownFrom || s.start > view.shownTo)
                 continue;
-            const float a = std::max(xOf(s.start), laneX), b = std::min(std::max(xOf(end), a + 2), laneX + width);
+            const float a = std::max(xOf(s.start), laneX - 2), b = std::max(xOf(end), a + 2);
             lanesDraw->AddRectFilled({a, y + ui(2)}, {b, y + laneHeight - ui(2)},
                                      ImGui::GetColorU32(withAlpha(runStatusColor(s.result), .8f)), ui(2));
         }
+        lanesDraw->PopClipRect();
         if (n + 1 == callers)
             lanesDraw->AddLine({laneX, y + laneHeight}, {laneX + width, y + laneHeight},
                                ImGui::GetColorU32(withAlpha(palette().muted, .4f)));
     }
-    ImGui::SetCursorScreenPos({origin.x, top + float(lanes.size()) * laneHeight});
-    ImGui::Dummy({1, 1});
-    // Clicking a lane moves the playhead there.
-    const bool lanesHovered = ImGui::IsWindowHovered() && io.MousePos.x >= laneX;
-    if (lanesHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-        seekTime(session, std::clamp(timeAt(io.MousePos.x), std::int64_t(0), run.duration()));
+    // The lanes' area: a click moves the playhead, a drag (or a middle or right drag) pans, Shift+drag picks a span
+    // to zoom to.
+    const float areaHeight = std::max(float(lanes.size()) * laneHeight, shownHeight);
+    ImGui::SetCursorScreenPos({laneX, top});
+    ImGui::InvisibleButton("##area", {width, std::max(areaHeight, 1.f)},
+                           ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle |
+                               ImGuiButtonFlags_MouseButtonRight);
+    const bool lanesHovered = ImGui::IsItemHovered();
+    static float pressX = 0;
+    static bool ranging = false, panned = false, left = false;
+    if (ImGui::IsItemActivated()) {
+        pressX = io.MousePos.x;
+        left = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+        ranging = io.KeyShift && left;
+        panned = false;
+    }
+    if (ImGui::IsItemActive()) {
+        const bool dragged = std::abs(io.MousePos.x - pressX) > ui(4) || !left;
+        if (ranging) {
+            const ImVec2 a{std::min(pressX, io.MousePos.x), ImGui::GetWindowPos().y},
+                b{std::max(pressX, io.MousePos.x), ImGui::GetWindowPos().y + ImGui::GetWindowHeight()};
+            lanesDraw->AddRectFilled(a, b, ImGui::GetColorU32(withAlpha(palette().accent, .15f)));
+            lanesDraw->AddRect(a, b, ImGui::GetColorU32(withAlpha(palette().accent, .7f)));
+        } else if (dragged && io.MouseDelta.x != 0) {
+            panned = true;
+            const auto shift = std::int64_t(double(io.MouseDelta.x) / width * span);
+            showSpan(view, view.shownFrom - shift, view.shownTo - shift);
+        }
+    }
+    if (ImGui::IsItemDeactivated()) {
+        if (ranging && std::abs(io.MousePos.x - pressX) > ui(4))
+            showSpan(view, timeAt(std::min(pressX, io.MousePos.x)), timeAt(std::max(pressX, io.MousePos.x)));
+        else if (left && !ranging && !panned && std::abs(io.MousePos.x - pressX) <= ui(4))
+            seekAt(pressX);
+        ranging = false;
+    }
+    // The wheel scrolls the lanes (the ones that don't fit).
+    if (ImGui::IsWindowHovered() && !io.KeyCtrl && !io.KeyShift && io.MouseWheel != 0)
+        ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseWheel * laneHeight * 3);
     ImGui::EndChild();
 
     // The playhead across the bar and the lanes.
     if (view.clock >= view.shownFrom && view.clock <= view.shownTo) {
         const float x = xOf(view.clock);
-        draw->AddLine({x, origin.y}, {x, ImGui::GetWindowPos().y + ImGui::GetWindowHeight()},
-                      ImGui::GetColorU32(palette().accent), ui(1.5f));
+        draw->AddLine({x, origin.y}, {x, bottom}, ImGui::GetColorU32(palette().accent), ui(1.5f));
     }
 
-    if (barHovered || lanesHovered) {
-        if (io.MouseWheel != 0) {
-            const auto at = timeAt(io.MousePos.x);
-            const double factor = io.MouseWheel > 0 ? .8 : 1.25;
-            view.shownFrom = at - std::int64_t(double(at - view.shownFrom) * factor);
-            view.shownTo = at + std::int64_t(double(view.shownTo - at) * factor);
-            view.shownFrom = std::max<std::int64_t>(view.shownFrom, 0);
-            view.shownTo = std::min(std::max(view.shownTo, view.shownFrom + 1000), duration);
+    // Zoom and pan with the wheel, a sideways swipe or a pinch, over the bar or the lanes.
+    static bool pinching = false;
+    static double pinchSpan = 0;
+    static std::int64_t pinchAt = 0;
+    const bool over = barHovered || lanesHovered;
+    if (session.pinch.active && (over || pinching)) {
+        if (!pinching) {
+            pinchSpan = span;
+            pinchAt = timeAt(io.MousePos.x);
         }
-        if (ImGui::IsMouseDragging(ImGuiMouseButton_Right, 0)) {
-            const auto shift = std::int64_t(double(io.MouseDelta.x) / width * span);
-            const auto length = view.shownTo - view.shownFrom;
-            view.shownFrom = std::clamp<std::int64_t>(view.shownFrom - shift, 0, duration - length);
-            view.shownTo = view.shownFrom + length;
-        }
-        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && barHovered)
-            view.shownFrom = view.shownTo = 0;
+        pinching = true;
+        const double length = pinchSpan / std::max(double(session.pinch.scale), .05);
+        const double before = double(pinchAt - view.shownFrom) / span;
+        showSpan(view, pinchAt - std::int64_t(length * before),
+                 pinchAt - std::int64_t(length * before) + std::int64_t(length));
+    } else
+        pinching = false;
+    if (!over)
+        return;
+    // Scrolling left (a positive sideways wheel, or Shift+wheel up) shows earlier times, as on the canvas.
+    const float sideways = io.MouseWheelH != 0 ? io.MouseWheelH : io.KeyShift ? io.MouseWheel : 0;
+    if (io.KeyCtrl && io.MouseWheel != 0) {
+        const auto at = timeAt(io.MousePos.x);
+        const double factor = std::pow(.8, double(io.MouseWheel));
+        showSpan(view, at - std::int64_t(double(at - view.shownFrom) * factor),
+                 at + std::int64_t(double(view.shownTo - at) * factor));
+    } else if (sideways != 0) {
+        const auto shift = std::int64_t(double(sideways) * span / 10);
+        showSpan(view, view.shownFrom - shift, view.shownTo - shift);
     }
 }
 } // namespace notgroot::ui

@@ -349,6 +349,8 @@ int App::run() {
             replay();
         window_->beginFrame();
         session_.pinch = {window_->pinch().active(), window_->pinch().scale()};
+        if (run_)
+            run_->pinch = session_.pinch;
         frame();
         ++frameCount_;
         const bool last = opt_.frames > 0 && frameCount_ >= opt_.frames;

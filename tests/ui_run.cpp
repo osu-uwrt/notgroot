@@ -217,6 +217,79 @@ TEST_F(RunHarness, ClickingTheTimelineKeepsPlaying) {
     EXPECT_GT(view().clock, 0);
 }
 
+// The timeline moves as the canvas does: Ctrl+wheel zooms at the pointer, Shift+wheel pans, the wheel alone scrolls the
+// lanes, a drag pans, Shift+drag zooms to a span, a click moves the playhead.
+TEST_F(RunHarness, TimelineMovesLikeTheCanvas) {
+    ImGuiWindow *timeline = ImGui::FindWindowByName("Timeline");
+    ASSERT_TRUE(timeline);
+    auto &io = ImGui::GetIO();
+    const float y = timeline->Pos.y + timeline->Size.y - 30; // in the lanes, below the last one
+    const float x = timeline->Pos.x + timeline->Size.x * .6f;
+    const auto shown = [&] { return std::make_pair(view().shownFrom, view().shownTo); };
+    const auto wheel = [&](float amount, ImGuiKey mod, bool sideways = false) {
+        io.AddMousePosEvent(x, y);
+        frame();
+        if (mod != ImGuiKey_None)
+            io.AddKeyEvent(mod, true);
+        io.AddMouseWheelEvent(sideways ? amount : 0, sideways ? 0 : amount);
+        frame();
+        if (mod != ImGuiKey_None)
+            io.AddKeyEvent(mod, false);
+        frames(2);
+    };
+    const auto drag = [&](float from, float to, bool shift) {
+        io.AddMousePosEvent(from, y);
+        frame();
+        if (shift)
+            io.AddKeyEvent(ImGuiMod_Shift, true);
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        frame();
+        for (int i = 1; i <= 4; ++i) {
+            io.AddMousePosEvent(from + (to - from) * float(i) / 4, y);
+            frame();
+        }
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        frame();
+        if (shift)
+            io.AddKeyEvent(ImGuiMod_Shift, false);
+        frames(2);
+    };
+    const auto whole = shown();
+    EXPECT_EQ(whole.first, 0);
+    EXPECT_EQ(whole.second, run().duration());
+
+    wheel(1, ImGuiKey_None); // scrolls lanes, not time
+    EXPECT_EQ(shown(), whole);
+
+    wheel(2, ImGuiMod_Ctrl);
+    auto zoomed = shown();
+    EXPECT_LT(zoomed.second - zoomed.first, whole.second - whole.first);
+    EXPECT_GT(zoomed.first, 0); // about the pointer, 60 % across: both ends move in
+    EXPECT_LT(zoomed.second, whole.second);
+
+    wheel(-1, ImGuiMod_Shift); // pans later
+    auto panned = shown();
+    EXPECT_EQ(panned.second - panned.first, zoomed.second - zoomed.first);
+    EXPECT_GT(panned.first, zoomed.first);
+    wheel(1, ImGuiKey_None, true); // a sideways swipe pans back
+    EXPECT_LT(shown().first, panned.first);
+
+    const auto before = shown();
+    drag(x, x + 100, false); // dragging right shows earlier times
+    EXPECT_LT(shown().first, before.first);
+    EXPECT_EQ(shown().second - shown().first, before.second - before.first);
+
+    const auto applied = view().state.applied;
+    drag(x - 80, x + 80, true); // Shift+drag zooms to that span
+    EXPECT_LT(shown().second - shown().first, before.second - before.first);
+    EXPECT_EQ(view().state.applied, applied); // and doesn't move the playhead
+
+    ui::seekTransitions(session, 0);
+    drag(x, x, false); // a click does
+    EXPECT_GT(view().clock, shown().first);
+    EXPECT_LT(view().clock, shown().second);
+}
+
 TEST_F(RunHarness, CardsShowTheirOwnInstance) {
     // Partway through the first move: its root runs, and a card opened in place under Dive's call shows the same.
     const int dive = instance("Dive"), move = instance("PrimitiveMovePosition");

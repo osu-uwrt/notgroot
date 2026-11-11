@@ -145,8 +145,18 @@ with their status at the playhead (amber running, green success, red failure; fa
 
 The *canvas* keys above also work while the Timeline has focus. Space still opens a call in place, showing that
 call's own instance. In the Run panel, click an instance to show it and double-click to move the playhead to when it
-started. In the Timeline, click or drag the bar or a lane to move the playhead (playing goes on from there), the wheel
-zooms, a right drag pans, and a double-click on the bar shows the whole run.
+started.
+
+The Timeline moves like the canvas:
+
+| Mouse | Does |
+|---|---|
+| Click or drag the bar, click a lane | moves the playhead (playing goes on from there) |
+| Ctrl+wheel, touchpad pinch | zooms time at the pointer |
+| Shift+wheel, sideways swipe, drag the lanes (or middle / right drag) | pans through time |
+| Wheel | scrolls the lanes |
+| Shift + drag on the lanes | zooms to that span |
+| Double-click the bar, Fit | shows the whole run; Frame zooms to when the canvas's subtree ran |
 
 ## Mouse
 
