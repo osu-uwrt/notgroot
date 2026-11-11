@@ -469,6 +469,9 @@ void drawTimeline(Session &session) {
     auto &view = viewOf(session);
     const auto &run = view.run;
     const auto duration = std::max<std::int64_t>(run.duration(), 1);
+    // The transport keys (P, , . [ ] F) work here as on the canvas: clicking the timeline shouldn't take them away.
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput)
+        session.canvasFocused = true;
 
     // Transport.
     const auto button = [&](const char *label, const char *command, const char *tip) {
@@ -526,10 +529,9 @@ void drawTimeline(Session &session) {
     ImGui::SetCursorScreenPos({laneX, origin.y});
     ImGui::InvisibleButton("##scrub", {width, barHeight});
     const bool barHovered = ImGui::IsItemHovered();
-    if (ImGui::IsItemActive()) {
-        view.playing = false;
+    // Clicking or dragging moves the playhead; playing goes on from there (held while dragging).
+    if (ImGui::IsItemActive())
         seekTime(session, std::clamp(timeAt(io.MousePos.x), std::int64_t(0), run.duration()));
-    }
     draw->AddRectFilled({laneX, origin.y}, {laneX + width, origin.y + barHeight},
                         ImGui::GetColorU32(ImGui::GetStyle().Colors[ImGuiCol_FrameBg]), ui(3));
     for (long at = run.nextFailure(0); at >= 0; at = run.nextFailure(std::size_t(at) + 1)) {
@@ -582,10 +584,8 @@ void drawTimeline(Session &session) {
     ImGui::Dummy({1, 1});
     // Clicking a lane moves the playhead there.
     const bool lanesHovered = ImGui::IsWindowHovered() && io.MousePos.x >= laneX;
-    if (lanesHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        view.playing = false;
+    if (lanesHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
         seekTime(session, std::clamp(timeAt(io.MousePos.x), std::int64_t(0), run.duration()));
-    }
     ImGui::EndChild();
 
     // The playhead across the bar and the lanes.

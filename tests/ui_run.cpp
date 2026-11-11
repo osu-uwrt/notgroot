@@ -6,6 +6,7 @@
 #include <fstream>
 #include <functional>
 #include <gtest/gtest.h>
+#include <imgui_internal.h>
 #include <set>
 
 using namespace notgroot;
@@ -173,6 +174,47 @@ TEST_F(RunHarness, PlayingMovesOnUntilTheEnd) {
         ;
     EXPECT_FALSE(view().playing);
     EXPECT_EQ(view().state.applied, run().transitions().size());
+}
+
+// Clicking the timeline while it plays moves the playhead and keeps playing from there; paused, it stays paused.
+TEST_F(RunHarness, ClickingTheTimelineKeepsPlaying) {
+    // The scrub bar: found by hovering down the Timeline window until it is under the mouse.
+    ImGuiWindow *timeline = ImGui::FindWindowByName("Timeline");
+    ASSERT_TRUE(timeline);
+    const ImGuiID scrub = ImHashStr("##scrub", 0, timeline->ID);
+    const float x = timeline->Pos.x + timeline->Size.x * .75f;
+    float y = -1;
+    for (float at = timeline->Pos.y; at < timeline->Pos.y + timeline->Size.y && y < 0; at += 2) {
+        ImGui::GetIO().AddMousePosEvent(x, at);
+        frame();
+        if (GImGui->HoveredId == scrub)
+            y = at;
+    }
+    ASSERT_GE(y, 0) << "no scrub bar";
+    const auto click = [&] {
+        auto &io = ImGui::GetIO();
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        frame();
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        frames(2);
+    };
+
+    ui::seekTransitions(session, 0);
+    press(ImGuiKey_P);
+    ASSERT_TRUE(view().playing);
+    click();
+    EXPECT_TRUE(view().playing);
+    const auto clicked = view().clock;
+    EXPECT_GT(clicked, run().duration() / 2); // three quarters across the lanes, past the middle of the run
+    ui::advanceRun(session, .5);
+    EXPECT_GT(view().clock, clicked);
+
+    press(ImGuiKey_P);
+    ASSERT_FALSE(view().playing);
+    ui::seekTransitions(session, 0);
+    click();
+    EXPECT_FALSE(view().playing);
+    EXPECT_GT(view().clock, 0);
 }
 
 TEST_F(RunHarness, CardsShowTheirOwnInstance) {

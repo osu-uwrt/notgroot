@@ -143,9 +143,10 @@ with their status at the playhead (amber running, green success, red failure; fa
 | Backspace | go up to the instance that called this one (*canvas*) |
 | Ctrl+Shift+Enter | show the cursor's node in the editor (when its tree hasn't changed since the run) |
 
-Space still opens a call in place, showing that call's own instance. In the Run panel, click an instance to show it
-and double-click to move the playhead to when it started. In the Timeline, click or drag the bar or a lane to move
-the playhead, the wheel zooms, a right drag pans, and a double-click on the bar shows the whole run.
+The *canvas* keys above also work while the Timeline has focus. Space still opens a call in place, showing that
+call's own instance. In the Run panel, click an instance to show it and double-click to move the playhead to when it
+started. In the Timeline, click or drag the bar or a lane to move the playhead (playing goes on from there), the wheel
+zooms, a right drag pans, and a double-click on the bar shows the whole run.
 
 ## Mouse
 
