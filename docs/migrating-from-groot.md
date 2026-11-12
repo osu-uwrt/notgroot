@@ -199,5 +199,5 @@ alike (up to about 20 keys in every theme; the biggest trees have around 47, whe
   run, or `notgroot --run FILE`). The log holds the tree as it ran, so it opens without the trees folder of that day;
   subtrees that have changed since are flagged, and the rest open in the editor with Ctrl+Shift+Enter. bt3's `.fbl`
   logs are a different format (Groot1's) and don't open.
-- **Live view:** notgroot has none yet. Set `doTask`'s `enable_groot2` parameter to `true` (port `groot2_port`,
-  default 1667) and attach Groot2 to watch a run. This has been checked to start, not yet with Groot2 attached.
+- **Live view:** notgroot has none yet. `doTask` already serves one for it (the run monitor, port 1670); until
+  notgroot reads it, replay the run's `.btlog` afterwards.
