@@ -252,6 +252,8 @@ struct RunClient::State {
     bool fresh = false;
     std::optional<std::pair<std::string, std::vector<std::string>>> askBlackboards;
     std::optional<BlackboardReply> blackboards;
+    std::string answered; // the run its last full poll was about, and when
+    Clock::time_point answeredAt;
 };
 
 namespace {
@@ -462,6 +464,8 @@ void RunClient::watch(std::shared_ptr<State> state) {
                 last->transitions != info.transitions)
                 state->fresh = true;
             state->pending.info = info;
+            state->answered = run;
+            state->answeredAt = Clock::now();
         }
         report(true, info.ended ? "run ended: " + info.result : "live");
 
@@ -565,6 +569,15 @@ std::optional<RunClient::Update> RunClient::take() {
     state_->pending.online = out.online;
     state_->pending.status = out.status;
     return out;
+}
+
+std::optional<double> RunClient::sinceAnswered(const std::string &run) const {
+    if (!state_)
+        return std::nullopt;
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (run.empty() || state_->answered != run)
+        return std::nullopt;
+    return std::chrono::duration<double>(Clock::now() - state_->answeredAt).count();
 }
 
 void RunClient::askBlackboards(const std::string &run, const std::vector<std::string> &paths) {

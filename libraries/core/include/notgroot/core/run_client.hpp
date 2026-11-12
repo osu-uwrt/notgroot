@@ -54,6 +54,8 @@ class RunClient {
         std::string status;          // "waiting for a run", "no answer from tcp://orin2:1670"...
     };
     std::optional<Update> take();
+    // Seconds since the monitor last answered about this run (none: it hasn't since connecting).
+    std::optional<double> sinceAnswered(const std::string &run) const;
 
     // Asks for these instances' blackboards in a run, once (the next poll); the answer comes from takeBlackboards().
     void askBlackboards(const std::string &run, const std::vector<std::string> &paths);

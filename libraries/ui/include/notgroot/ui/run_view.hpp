@@ -36,6 +36,7 @@ struct RunView {
         core::RunInfo info;
         std::string xml; // the header as it came (Save run writes it back)
         bool online = false;
+        bool current = false; // the monitor answered about this run within the last second
         std::string status;
         // Blackboards of the instance the Blackboard panel shows (by path), and whether it was drawn this frame.
         std::string blackboardPath;
@@ -55,6 +56,13 @@ bool openLiveRun(Session &, const std::string &address, const core::RunInfo &, c
 void appendLive(Session &, const std::vector<core::Transition> &);
 // The live run as a .btlog (what doTask writes, so far).
 bool saveRun(const RunView &, const std::filesystem::path &, std::string &error);
+
+// What the shown run is: a replay, or a live run that is live, stale (no recent answer), ended or disconnected.
+enum class RunSource { Replay, Live, Stale, Ended, Disconnected };
+RunSource runSource(const Session &);
+const char *runSourceName(RunSource); // "LIVE", "REPLAY"...
+// Still coming in (live or stale): the playhead stays at the live end, so the replay controls are off.
+bool runIsLive(const Session &);
 
 ImVec4 runStatusColor(core::RunStatus);
 const char *runStatusName(core::RunStatus);

@@ -933,18 +933,22 @@ void Session::registerCommands() {
     add({"run.close", "Close the run", "Run", 0, false, host(closeRun), nullptr});
     add({"run.save", "Save the live run (.btlog)…", "Run", ImGuiMod_Ctrl | ImGuiKey_S, false, host(saveLive),
          [&view] { return view.live.has_value(); }});
+    // Seeking and playing are for replays: live, the playhead stays at the live end.
+    const auto replay = [this] { return !runIsLive(*this); };
+    const auto whyLive = [] { return std::string("Live: the playhead stays at the live end until the run ends"); };
     add({"run.play", "Play / pause", "Run", ImGuiKey_P, true,
          [this, &view] {
              if (!view.playing && view.state.applied >= view.run.transitions().size())
                  seekTransitions(*this, 0);
              view.playing = !view.playing;
          },
-         nullptr});
+         replay, nullptr, whyLive});
     add({"run.follow", "Follow what runs", "Run", ImGuiKey_F, true, [&view] { view.follow = !view.follow; }, nullptr});
     add({"run.next", "Step to the next transition", "Run", ImGuiKey_Period, true,
-         [this, &view] { seekTransitions(*this, view.state.applied + 1); }, nullptr});
+         [this, &view] { seekTransitions(*this, view.state.applied + 1); }, replay, nullptr, whyLive});
     add({"run.previous", "Step back a transition", "Run", ImGuiKey_Comma, true,
-         [this, &view] { seekTransitions(*this, view.state.applied ? view.state.applied - 1 : 0); }, nullptr});
+         [this, &view] { seekTransitions(*this, view.state.applied ? view.state.applied - 1 : 0); }, replay, nullptr,
+         whyLive});
     add({"run.nextFailure", "Next subtree failure", "Run", ImGuiKey_RightBracket, true,
          [this, &view] {
              const long at = view.run.nextFailure(view.state.applied);
@@ -953,7 +957,7 @@ void Session::registerCommands() {
              else
                  seekTransitions(*this, std::size_t(at) + 1);
          },
-         nullptr});
+         replay, nullptr, whyLive});
     add({"run.previousFailure", "Previous subtree failure", "Run", ImGuiKey_LeftBracket, true,
          [this, &view] {
              const long at = view.run.previousFailure(view.state.applied);
@@ -962,7 +966,7 @@ void Session::registerCommands() {
              else
                  seekTransitions(*this, std::size_t(at) + 1);
          },
-         nullptr});
+         replay, nullptr, whyLive});
     add({"run.into", "Go into the subtree", "Run", ImGuiKey_Enter, true, [this] { run("node.definition"); }, nullptr});
     add({"run.up", "Go up to the caller", "Run", ImGuiKey_Backspace, true,
          [this, &view] {

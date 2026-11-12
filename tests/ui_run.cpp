@@ -439,7 +439,45 @@ TEST_F(RunHarness, LiveRunGrowsAtItsLiveEnd) {
     ASSERT_TRUE(live.loadBuiltinModels(NOTGROOT_BUILTIN_MODELS, error)) << error;
     ASSERT_TRUE(ui::openLiveRun(live, "tcp://localhost:1670", info, log.xml(), error)) << error;
     ASSERT_TRUE(live.runView->live);
-    EXPECT_TRUE(live.runView->follow);
+
+    // LIVE only while the monitor keeps answering about this run.
+    using ui::RunSource;
+    bool connected = true;
+    live.liveConnected = [&] { return connected; };
+    EXPECT_EQ(ui::runSource(session), RunSource::Replay);
+    EXPECT_STREQ(ui::runSourceName(ui::runSource(session)), "REPLAY");
+    EXPECT_EQ(ui::runSource(live), RunSource::Stale); // nothing heard yet
+    live.runView->live->online = live.runView->live->current = true;
+    EXPECT_EQ(ui::runSource(live), RunSource::Live);
+    EXPECT_STREQ(ui::runSourceName(ui::runSource(live)), "LIVE");
+    live.runView->live->current = false;
+    EXPECT_EQ(ui::runSource(live), RunSource::Stale);
+    live.runView->live->current = true;
+    live.runView->live->online = false;
+    EXPECT_EQ(ui::runSource(live), RunSource::Stale);
+    live.runView->live->online = true;
+    live.runView->live->info.ended = true;
+    EXPECT_EQ(ui::runSource(live), RunSource::Ended);
+    EXPECT_STREQ(ui::runSourceName(ui::runSource(live)), "REPLAY");
+    connected = false;
+    EXPECT_EQ(ui::runSource(live), RunSource::Disconnected);
+    EXPECT_STREQ(ui::runSourceName(ui::runSource(live)), "REPLAY");
+    live.runView->live->info.ended = false;
+
+    // Live (or stale), the replay controls are off; once it's a replay they're back.
+    connected = true;
+    live.runView->live->current = false;
+    EXPECT_TRUE(ui::runIsLive(live));
+    for (const char *id : {"run.play", "run.next", "run.previous", "run.nextFailure", "run.previousFailure"})
+        EXPECT_FALSE(ui::Session::enabled(*live.command(id))) << id;
+    EXPECT_TRUE(ui::Session::enabled(*live.command("run.follow")));
+    live.runView->live->info.ended = true;
+    EXPECT_FALSE(ui::runIsLive(live));
+    EXPECT_TRUE(ui::Session::enabled(*live.command("run.play")));
+    live.runView->live->info.ended = false;
+    live.liveConnected = nullptr;
+    EXPECT_FALSE(live.runView->follow); // offered, not on
+    live.runView->follow = true;
     EXPECT_TRUE(live.workspace.readOnly());
     EXPECT_TRUE(live.command("run.save"));
     EXPECT_FALSE(session.command("run.save")->enabled()); // a file needs no saving

@@ -202,13 +202,19 @@ void App::connectTo(const std::string &address) {
 void App::disconnect() {
     live_.disconnect();
     liveRun_.clear();
-    shown().status("Disconnected from doTask");
+    shown().status(run_ && run_->runView->live ? "Disconnected from doTask: replay mode, no longer live"
+                                                : "Disconnected from doTask");
 }
 
 void App::pollLive() {
     if (!live_.active())
         return;
     const auto isLive = [this] { return run_ && run_->runView->live && run_->runView->live->info.run == liveRun_; };
+    // Live only while the monitor keeps answering about the run shown.
+    if (run_ && run_->runView->live) {
+        const auto since = live_.sinceAnswered(run_->runView->live->info.run);
+        run_->runView->live->current = since && *since < 1;
+    }
     if (auto update = live_.take()) {
         // A new run: shown now when a run was shown (or none was open), else announced.
         if (update->started) {
@@ -234,8 +240,11 @@ void App::pollLive() {
         if (isLive()) {
             auto &live = *run_->runView->live;
             ui::appendLive(*run_, update->transitions);
-            if (update->info && update->info->run == liveRun_)
+            if (update->info && update->info->run == liveRun_) {
+                if (update->info->ended && !live.info.ended)
+                    run_->status("The run ended (" + update->info->result + "): replay mode, no longer live");
                 live.info = *update->info;
+            }
             live.online = update->online;
             live.status = update->status;
         }
@@ -321,7 +330,7 @@ void App::quit() {
 void App::updateTitle() {
     std::string title = "notgroot";
     if (showingRun_ && run_)
-        title = (run_->runView->live ? "LIVE " : "RUN ") + run_->runView->title + " — notgroot";
+        title = std::string(ui::runSourceName(ui::runSource(*run_))) + " " + run_->runView->title + " — notgroot";
     else if (session_.workspace.isOpen())
         title = (session_.workspace.anyEdited() ? "• " : "") + session_.workspace.directory().string() +
                 (session_.active.empty() ? "" : " — " + session_.active) + " — notgroot";

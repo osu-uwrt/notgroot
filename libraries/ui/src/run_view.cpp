@@ -162,6 +162,36 @@ std::uint16_t cardUid(const Session &session, const CardKey &key) {
         return session.runView->run.statusUid(instance);
     return session.runView->run.uidAt(instance, key.ref.path);
 }
+
+// Red while it records, amber otherwise.
+ImVec4 runSourceColor(RunSource source) {
+    switch (source) {
+    case RunSource::Live:
+        return palette().error;
+    case RunSource::Stale:
+    case RunSource::Replay:
+    case RunSource::Ended:
+    case RunSource::Disconnected:
+        return palette().warn;
+    default:
+        return palette().muted;
+    }
+}
+
+const char *runSourceHint(RunSource source) {
+    switch (source) {
+    case RunSource::Live:
+        return "doTask is running this tree now";
+    case RunSource::Stale:
+        return "No recent answer from doTask's monitor: this may be behind";
+    case RunSource::Ended:
+        return "This run has ended on doTask";
+    case RunSource::Disconnected:
+        return "Not watching doTask anymore: this is the run as far as it came";
+    default:
+        return "A replay of a saved run";
+    }
+}
 } // namespace
 
 bool openRun(Session &session, const std::filesystem::path &path, std::string &error) {
@@ -200,8 +230,7 @@ bool openLiveRun(Session &session, const std::string &address, const RunInfo &in
     char when[32];
     std::strftime(when, sizeof(when), "%m-%d %H:%M:%S", &local);
     view->title = std::string(when) + " · " + view->run.mission();
-    view->live = RunView::Live{address, info, xml, true, "live", {}, {}, {}, false};
-    view->follow = true;
+    view->live = RunView::Live{address, info, xml, true, false, "live", {}, {}, {}, false};
     session.attachRun(view);
     focusFrame(session, 0);
     return true;
@@ -240,6 +269,33 @@ bool saveRun(const RunView &view, const std::filesystem::path &path, std::string
         return false;
     }
     return true;
+}
+
+RunSource runSource(const Session &session) {
+    const auto &live = session.runView->live;
+    if (!live)
+        return RunSource::Replay;
+    if (!session.liveConnected || !session.liveConnected())
+        return RunSource::Disconnected;
+    if (live->info.ended)
+        return RunSource::Ended;
+    return live->online && live->current ? RunSource::Live : RunSource::Stale;
+}
+
+bool runIsLive(const Session &session) {
+    const auto source = runSource(session);
+    return source == RunSource::Live || source == RunSource::Stale;
+}
+
+const char *runSourceName(RunSource source) {
+    switch (source) {
+    case RunSource::Live:
+        return "LIVE";
+    case RunSource::Stale:
+        return "STALE";
+    default:
+        return "REPLAY"; // ended or disconnected: nothing more comes
+    }
 }
 
 ImVec4 runStatusColor(RunStatus status) {
@@ -399,10 +455,10 @@ void drawBreadcrumb(Session &session) {
         chain.insert(chain.begin(), i);
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {ui(4), ImGui::GetStyle().ItemSpacing.y});
     ImGui::AlignTextToFramePadding();
-    if (view.live)
-        ImGui::TextColored(view.live->online ? palette().error : palette().muted, "LIVE");
-    else
-        ImGui::TextColored(palette().warn, "RUN");
+    const auto source = runSource(session);
+    ImGui::TextColored(runSourceColor(source), "%s", runSourceName(source));
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", runSourceHint(source));
     for (const int i : chain) {
         ImGui::SameLine();
         ImGui::TextDisabled(i == chain.front() ? "" : "›");
@@ -423,6 +479,22 @@ void drawBreadcrumb(Session &session) {
             ImGui::SetTooltip("The editor's %s differs from the one that ran: this shows it as it ran.",
                               instanceAt(view, view.frame).id.c_str());
     }
+    // A live run that ended or lost its link is a replay from here on: a strip says so until it's closed.
+    if (source == RunSource::Ended || source == RunSource::Disconnected) {
+        const auto text = source == RunSource::Ended
+                              ? "Run ended: " + view.live->info.result + " · replay mode, no longer live"
+                              : "Disconnected from " + view.live->address + " · replay mode, no longer live";
+        auto tint = palette().warn;
+        tint.w = .2f;
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        const ImVec2 to{at.x + ImGui::GetContentRegionAvail().x, at.y + ImGui::GetFrameHeight()};
+        ImGui::GetWindowDrawList()->AddRectFilled(at, to, ImGui::GetColorU32(tint), ui(3));
+        ImGui::SetCursorScreenPos({at.x + ui(6), at.y});
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(palette().warn, "%s", text.c_str());
+        ImGui::SetCursorScreenPos({at.x, to.y});
+        ImGui::Dummy({0, 0});
+    }
     ImGui::PopStyleVar();
     ImGui::Separator();
 }
@@ -442,14 +514,17 @@ void drawRunPanel(Session &session) {
     }
     if (view.live) {
         const auto &live = *view.live;
-        const bool connected = session.liveConnected && session.liveConnected();
-        // Red while it records, amber while the link is down.
-        dot(!connected || live.info.ended ? palette().muted : live.online ? palette().error : palette().warn, ui(4));
+        const auto source = runSource(session);
+        const bool connected = source != RunSource::Disconnected;
+        dot(runSourceColor(source), ui(4));
         ImGui::SameLine();
         if (!connected)
             ImGui::TextDisabled("was live from %s", live.address.c_str());
         else if (live.info.ended)
             ImGui::TextDisabled("%s: ended %s", live.address.c_str(), live.info.result.c_str());
+        else if (source == RunSource::Stale)
+            ImGui::TextDisabled("%s: stale, %s", live.address.c_str(),
+                                live.online ? "no recent answer" : live.status.c_str());
         else
             ImGui::TextDisabled("%s: %s", live.address.c_str(), live.status.c_str());
         if (ImGui::IsItemHovered())
@@ -529,7 +604,8 @@ void drawRunPanel(Session &session) {
             }
             if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
                 focusFrame(session, i);
-            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && run.ran(i))
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && run.ran(i) &&
+                !runIsLive(session))
                 seekTime(session, run.spans(i).front().start);
             const auto &spans = run.spans(i);
             std::int64_t total = 0;
@@ -582,12 +658,13 @@ void drawRunPanel(Session &session) {
     auto before = after;
     if (before != changes.begin() && *std::prev(before) + 1 == view.state.applied)
         --before;
-    ImGui::BeginDisabled(before == changes.begin());
+    const bool live = runIsLive(session);
+    ImGui::BeginDisabled(live || before == changes.begin());
     if (ImGui::SmallButton("< previous change"))
         seekTransitions(session, *std::prev(before) + 1);
     ImGui::EndDisabled();
     ImGui::SameLine();
-    ImGui::BeginDisabled(after == changes.end());
+    ImGui::BeginDisabled(live || after == changes.end());
     if (ImGui::SmallButton("next change >"))
         seekTransitions(session, *after + 1);
     ImGui::EndDisabled();
@@ -609,6 +686,9 @@ void drawTimeline(Session &session) {
             ImGui::SetTooltip("%s", tip);
         ImGui::SameLine();
     };
+    // Live, the playhead stays at the live end: no seeking, playing or speed until it's a replay.
+    const bool live = runIsLive(session);
+    ImGui::BeginDisabled(live);
     if (ImGui::Button("|<"))
         seekTransitions(session, 0);
     ImGui::SameLine();
@@ -619,9 +699,11 @@ void drawTimeline(Session &session) {
     button("]", "run.nextFailure", "Next subtree failure (])");
     if (ImGui::Button(">|"))
         seekTransitions(session, run.transitions().size());
+    ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::Checkbox("Follow (F)", &view.follow);
     ImGui::SameLine();
+    ImGui::BeginDisabled(live);
     ImGui::SetNextItemWidth(ui(70));
     static const float speeds[] = {.1f, .25f, .5f, 1, 2, 5, 10, 30};
     char speedText[16];
@@ -634,6 +716,9 @@ void drawTimeline(Session &session) {
         }
         ImGui::EndCombo();
     }
+    ImGui::EndDisabled();
+    if (live && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Live: the playhead stays at the live end until the run ends");
     ImGui::SameLine();
     ImGui::Text("%s / %s", clockText(view.clock).c_str(), clockText(run.duration()).c_str());
     ImGui::SameLine();
@@ -670,7 +755,10 @@ void drawTimeline(Session &session) {
     const auto span = double(view.shownTo - view.shownFrom);
     const auto xOf = [&](std::int64_t t) { return laneX + float(double(t - view.shownFrom) / span * width); };
     const auto timeAt = [&](float x) { return view.shownFrom + std::int64_t(double(x - laneX) / width * span); };
-    const auto seekAt = [&](float x) { seekTime(session, std::clamp(timeAt(x), std::int64_t(0), run.duration())); };
+    const auto seekAt = [&](float x) {
+        if (!live)
+            seekTime(session, std::clamp(timeAt(x), std::int64_t(0), run.duration()));
+    };
     auto *draw = ImGui::GetWindowDrawList();
     const auto &io = ImGui::GetIO();
     const float bottom = ImGui::GetWindowPos().y + ImGui::GetWindowHeight();

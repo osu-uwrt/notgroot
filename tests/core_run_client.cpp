@@ -278,13 +278,19 @@ TEST(RunClient, Reconnects) {
     monitor->start();
 
     RunClient client;
+    EXPECT_FALSE(client.sinceAnswered("7"));
     ASSERT_TRUE(client.connect("localhost:" + std::to_string(port)));
     Seen seen;
     ASSERT_TRUE(waitFor(client, seen, [&] { return seen.transitions.size() == 200; }));
+    ASSERT_TRUE(client.sinceAnswered("7"));
+    EXPECT_LT(*client.sinceAnswered("7"), 1);
+    EXPECT_FALSE(client.sinceAnswered("8"));
     monitor.reset();
     ASSERT_TRUE(waitFor(
         client, seen, [&] { return !seen.online; }, 8000));
     EXPECT_NE(seen.status.find("no answer"), std::string::npos) << seen.status;
+    // Stale: the last answer is as old as the timeout.
+    EXPECT_GT(*client.sinceAnswered("7"), 1);
 
     monitor = std::make_unique<FakeMonitor>(port, 65536);
     monitor->begin("7", log.xml, log.start, log.transitions);
