@@ -60,13 +60,15 @@ FilePicker::~FilePicker() {
 std::vector<std::string> FilePicker::command(const std::string &program, const std::string &title,
                                              const std::string &start, const std::string &kind,
                                              const std::vector<std::string> &patterns, unsigned long parent,
-                                             bool folder) {
+                                             bool folder, bool save) {
     if (program == "kdialog") {
         std::vector<std::string> args{"kdialog", "--title",
                                       title,     "--getopenfilename",
                                       start,     patterns.empty() ? "*" : joined(patterns) + "|" + kind};
         if (folder)
             args = {"kdialog", "--title", title, "--getexistingdirectory", start};
+        else if (save)
+            args[3] = "--getsavefilename";
         if (parent)
             args.insert(args.begin() + 1, {"--attach", std::to_string(parent)});
         return args;
@@ -74,7 +76,11 @@ std::vector<std::string> FilePicker::command(const std::string &program, const s
     std::vector<std::string> args{"zenity", "--file-selection", "--title=" + title, "--filename=" + start};
     if (folder)
         args.push_back("--directory");
-    else if (!patterns.empty())
+    if (save) {
+        args.push_back("--save");
+        args.push_back("--confirm-overwrite");
+    }
+    if (!folder && !patterns.empty())
         args.push_back("--file-filter=" + kind + " | " + joined(patterns));
     if (!folder)
         args.push_back("--file-filter=All files | *");
@@ -86,7 +92,7 @@ std::vector<std::string> FilePicker::command(const std::string &program, const s
 }
 
 bool FilePicker::open(const std::string &title, const fs::path &start, const std::string &kind,
-                      const std::vector<std::string> &patterns, bool folder) {
+                      const std::vector<std::string> &patterns, bool folder, bool save) {
     std::lock_guard<std::mutex> lock(state_->mutex);
     if (program_.empty() || state_->busy)
         return false;
@@ -100,7 +106,7 @@ bool FilePicker::open(const std::string &title, const fs::path &start, const std
     }
     if (fs::is_directory(from, error) && from.back() != '/')
         from += '/';
-    else if (!fs::exists(from, error) && fs::is_directory(fs::path(from).parent_path(), error))
+    else if (!save && !fs::exists(from, error) && fs::is_directory(fs::path(from).parent_path(), error))
         from = fs::path(from).parent_path().string() + '/'; // a file that is gone: its folder
 
     // The dialog writes the path to stdout; its stderr (GTK chatter) goes nowhere.
@@ -111,7 +117,7 @@ bool FilePicker::open(const std::string &title, const fs::path &start, const std
     posix_spawn_file_actions_init(&actions);
     posix_spawn_file_actions_adddup2(&actions, out[1], STDOUT_FILENO);
     posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
-    const auto args = command(program_, title, from, kind, patterns, parent_, folder);
+    const auto args = command(program_, title, from, kind, patterns, parent_, folder, save);
     std::vector<char *> argv;
     for (const auto &arg : args)
         argv.push_back(const_cast<char *>(arg.c_str()));

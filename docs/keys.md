@@ -132,9 +132,14 @@ as they ran: it opens beside the editor, read-only. The canvas shows one subtree
 with their status at the playhead (amber running, green success, red failure; faded once idle again). Showing an
 instance while it runs puts the cursor on its deepest running node, in view; with Follow on, the view keeps up with it.
 
+Connected to doTask (F5), each run opens as it starts and grows as it runs; the playhead stays at the live end until
+you move it back (`>|` catches up again). The Blackboard panel shows the blackboard of the cursor's subtree instance.
+
 | Key | Does |
 |---|---|
 | Ctrl+Shift+O | open a run (`.btlog`) |
+| F5 | connect to doTask's run monitor (`orin2`, `localhost:1670`…): its runs open live as they start |
+| Ctrl+S | save the live run as a `.btlog` (in a live run) |
 | F6 | switch the canvas, inspector and variables between the editor and the run |
 | P | play / pause (*canvas*). The Timeline sets the speed |
 | . / , (Period / Comma) | step to the next / previous transition (*canvas*) |

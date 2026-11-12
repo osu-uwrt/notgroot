@@ -226,6 +226,10 @@ class Session {
     std::function<void()> switchView;                      // between the editor and the run
     std::function<void()> closeRun;                        // closes the run
     std::function<void(const core::NodeRef &)> showSource; // a run's node in the editor
+    std::function<void()> connectLive;                     // Connect to doTask: asks where
+    std::function<void()> disconnectLive;
+    std::function<bool()> liveConnected; // watching doTask's run monitor (connected or trying)
+    std::function<void()> saveLive;      // Save run: asks where
 
     // Copy of a model (pointers into the catalog die with the next edit).
     bool model(const std::string &id, core::NodeModel &out) const;

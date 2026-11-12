@@ -25,6 +25,8 @@ endfunction()
 find_package(yaml-cpp REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(tinyxml2 REQUIRED IMPORTED_TARGET tinyxml2) # Ubuntu's package has no CMake config
+pkg_check_modules(libzmq REQUIRED IMPORTED_TARGET libzmq)     # doTask's run monitor (libzmq3-dev)
+find_package(ZLIB REQUIRED)
 find_package(glfw3 3.3 REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(GLEW REQUIRED)

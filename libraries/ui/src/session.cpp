@@ -267,9 +267,9 @@ void Session::lock(const std::string &subtree) {
     for (const auto &id : under)
         if (v.unlocked.erase(id)) {
             ++locked;
-            selection.erase(std::remove_if(selection.begin(), selection.end(),
-                                           [&](const NodeRef &r) { return r.tree == id; }),
-                            selection.end());
+            selection.erase(
+                std::remove_if(selection.begin(), selection.end(), [&](const NodeRef &r) { return r.tree == id; }),
+                selection.end());
         }
     if (locked)
         status("Locked " + subtree + (locked > 1 ? " and the subtrees under it" : ""));
@@ -924,10 +924,15 @@ void Session::registerCommands() {
     add({"run.open", "Open run (.btlog)…", "Run", ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_O, false, host(browseRun),
          nullptr});
     add({"run.switch", "Switch between the editor and the run", "Run", ImGuiKey_F6, false, host(switchView), nullptr});
+    const auto connected = [this] { return liveConnected && liveConnected(); };
+    add({"run.connect", "Connect to doTask (live)…", "Run", ImGuiKey_F5, false, host(connectLive), nullptr});
+    add({"run.disconnect", "Disconnect from doTask", "Run", 0, false, host(disconnectLive), connected});
     if (!runView)
         return;
     auto &view = *runView;
     add({"run.close", "Close the run", "Run", 0, false, host(closeRun), nullptr});
+    add({"run.save", "Save the live run (.btlog)…", "Run", ImGuiMod_Ctrl | ImGuiKey_S, false, host(saveLive),
+         [&view] { return view.live.has_value(); }});
     add({"run.play", "Play / pause", "Run", ImGuiKey_P, true,
          [this, &view] {
              if (!view.playing && view.state.applied >= view.run.transitions().size())

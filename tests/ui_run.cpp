@@ -421,3 +421,62 @@ TEST_F(RunHarness, KeysDocListsTheRunKeys) {
                 << command.id << " (" << ui::chordName(command.chord) << ")";
         }
 }
+
+// A live run: opened from its header as doTask starts it, then fed as the monitor's transitions come.
+TEST_F(RunHarness, LiveRunGrowsAtItsLiveEnd) {
+    std::string bytes, error;
+    ASSERT_TRUE(core::readFile(test::data("runs") / "sim.btlog", bytes));
+    core::RunLog log;
+    ASSERT_TRUE(log.feed(bytes, error)) << error;
+    const auto all = log.takeTransitions();
+    core::RunInfo info;
+    info.run = "1";
+    info.log = "/home/ros/btlogs/BTLog_2026_11_12_00:52:42.btlog";
+    info.startUsec = log.startUsec();
+    info.result = "RUNNING";
+
+    ui::Session live;
+    ASSERT_TRUE(live.loadBuiltinModels(NOTGROOT_BUILTIN_MODELS, error)) << error;
+    ASSERT_TRUE(ui::openLiveRun(live, "tcp://localhost:1670", info, log.xml(), error)) << error;
+    ASSERT_TRUE(live.runView->live);
+    EXPECT_TRUE(live.runView->follow);
+    EXPECT_TRUE(live.workspace.readOnly());
+    EXPECT_TRUE(live.command("run.save"));
+    EXPECT_FALSE(session.command("run.save")->enabled()); // a file needs no saving
+
+    // At the live end, the playhead keeps up; Follow shows the deepest instance running.
+    const std::size_t half = all.size() / 2;
+    ui::appendLive(live, {all.begin(), all.begin() + long(half)});
+    EXPECT_EQ(live.runView->state.applied, half);
+    const int deepest = live.runView->run.deepestRunning(live.runView->state);
+    ASSERT_GE(deepest, 0);
+    EXPECT_EQ(live.runView->frame, deepest);
+
+    // Scrubbed back, it stays put while more comes.
+    ui::seekTransitions(live, 10);
+    ui::appendLive(live, {all.begin() + long(half), all.begin() + long(half + 5)});
+    EXPECT_EQ(live.runView->state.applied, 10u);
+    ui::seekTransitions(live, live.runView->run.transitions().size());
+    ui::appendLive(live, {all.begin() + long(half + 5), all.end()});
+    EXPECT_EQ(live.runView->state.applied, all.size());
+
+    // Save run writes what doTask wrote.
+    const auto saved = std::filesystem::temp_directory_path() / "notgroot_live_test.btlog";
+    ASSERT_TRUE(ui::saveRun(*live.runView, saved, error)) << error;
+    std::string written;
+    ASSERT_TRUE(core::readFile(saved, written));
+    std::filesystem::remove(saved);
+    EXPECT_EQ(written, bytes);
+    EXPECT_FALSE(ui::saveRun(view(), saved, error));
+
+    // The Blackboard panel shows the cursor's instance once its values come.
+    live.runView->live->blackboards[""] = {{"depth", "1.5"}};
+    ImGui::NewFrame();
+    if (ImGui::Begin("Blackboard"))
+        ui::drawBlackboard(live);
+    ImGui::End();
+    ImGui::Render();
+    EXPECT_TRUE(live.runView->live->blackboardShown);
+    EXPECT_EQ(live.runView->live->blackboardPath,
+              live.runView->run.instances()[std::size_t(live.runView->frame)].path);
+}

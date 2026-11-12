@@ -31,7 +31,8 @@ is in [keys.md](keys.md) (F1 in the editor).
 | Edit ports in the node box | Double-click a port's row to edit it on the card (a node's title names it), or use the Inspector (Enter on a node). The `{}` button switches a value between text and key |
 | Expand a subtree in place | Space, or the round button under the call. It starts locked (grayed); the padlock on the call's corner or Ctrl+U unlocks it to edit there, globals included. Ctrl+Enter opens it in its own tab |
 | Save rewrites the file from Groot's model | Saves only the files you changed, in one canonical format. Comments and attribute order are kept, and an unchanged file keeps its bytes |
-| Log replay | Open a `doTask` log (`.btlog`, Ctrl+Shift+O). It opens read-only beside the editor: one subtree instance at a time, a call stack of instances and a timeline. There is no live monitor yet (below) |
+| Log replay | Open a `doTask` log (`.btlog`, Ctrl+Shift+O). It opens read-only beside the editor: one subtree instance at a time, a call stack of instances and a timeline |
+| Live monitor (Groot2 PRO) | Run > Connect to doTask (F5): every run shows as it happens, in the same view as a replay, with blackboards. Read-only: no breakpoints or injected statuses |
 
 notgroot writes nothing into the XML of its own except `<!-- notgroot:… -->` comments (a subtree's color, the
 globals marker). BehaviorTree.CPP ignores them; keep them when you hand-edit.
@@ -199,5 +200,8 @@ alike (up to about 20 keys in every theme; the biggest trees have around 47, whe
   run, or `notgroot --run FILE`). The log holds the tree as it ran, so it opens without the trees folder of that day;
   subtrees that have changed since are flagged, and the rest open in the editor with Ctrl+Shift+Enter. bt3's `.fbl`
   logs are a different format (Groot1's) and don't open.
-- **Live view:** notgroot has none yet. `doTask` already serves one for it (the run monitor, port 1670); until
-  notgroot reads it, replay the run's `.btlog` afterwards.
+- **Live view:** Run > Connect to doTask (F5) with `orin2` (Talos) or `localhost` (a sim), or `notgroot --connect
+  orin2`. notgroot reads `doTask`'s run monitor (port 1670, [contract section 8](contract.md#8-runtime)), so it
+  needs no ROS. Each run opens as it starts; connecting late, or after the end, still shows all of it. Ctrl+S saves it
+  as a `.btlog`, the same bytes as doTask's own (timestamps may differ by 1 µs). Groot2's publisher (1667) is gone
+  from doTask.

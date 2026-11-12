@@ -27,10 +27,10 @@ class FilePicker {
     }
 
     // Opens the dialog at `start` (a file to preselect or a folder; empty: home) listing `patterns` (e.g. *.yaml)
-    // under the filter name `kind`, or everything; `folder` picks a folder instead. False when there is no picker or a
-    // dialog is already open.
+    // under the filter name `kind`, or everything; `folder` picks a folder instead, `save` a file to write (`start`
+    // names it). False when there is no picker or a dialog is already open.
     bool open(const std::string &title, const std::filesystem::path &start, const std::string &kind,
-              const std::vector<std::string> &patterns, bool folder = false);
+              const std::vector<std::string> &patterns, bool folder = false, bool save = false);
     bool busy() const;
     // The file picked, once, after the dialog closed on one (nothing on cancel or failure).
     std::optional<std::filesystem::path> take();
@@ -41,7 +41,7 @@ class FilePicker {
     static std::vector<std::string> command(const std::string &program, const std::string &title,
                                             const std::string &start, const std::string &kind,
                                             const std::vector<std::string> &patterns, unsigned long parent,
-                                            bool folder = false);
+                                            bool folder = false, bool save = false);
 
   private:
     struct State; // shared with the thread that waits for the dialog

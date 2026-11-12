@@ -17,7 +17,7 @@ build/release/app/notgroot ~/osu-uwrt/development/software/src/riptide_autonomy/
 ```
 
 - **Dependencies:** `cmake g++ libglfw3-dev libglew-dev libyaml-cpp-dev libfontconfig-dev libpng-dev libtinyxml2-dev
-  libgtest-dev`, plus `zenity` (or kdialog) for File > Open.
+  libzmq3-dev zlib1g-dev libgtest-dev`, plus `zenity` (or kdialog) for File > Open.
 - **BehaviorTree.CPP:** the first configure downloads BehaviorTree.CPP 4.10.0 (the version the robot runs) and builds
   it without ROS, for the check below.
 - **What opens:** notgroot opens a trees folder, a file inside one, or a single loose tree file. Without an argument,
@@ -114,6 +114,11 @@ saving writes only the files you changed. Includes are recomputed on save, so yo
   - The **Timeline** plays at any speed, steps through transitions, jumps between subtree failures, and has a lane per
     caller and call. **Follow** keeps the canvas on the deepest subtree running.
   - Subtrees that changed since the run are flagged; nodes of the rest open in the editor (Ctrl+Shift+Enter).
+- **Live.** Run > Connect to doTask (F5, or `notgroot --connect orin2`) watches doTask's run monitor (port 1670) and
+  opens each run as it starts, the same view growing at its live end: the playhead keeps up while it is at the end
+  (scrub back to look, `>|` to catch up), and Follow is on. A run already going, or just ended, opens whole. The
+  **Blackboard** panel shows the cursor's subtree instance's blackboard, four times a second. Ctrl+S saves the run
+  as the `.btlog` doTask writes. The link only reads: nothing sent to doTask changes the tree.
 
 [docs/keys.md](docs/keys.md) lists every key and mouse action; F1 shows the same list in the editor. The status bar shows
 the main ones, and Ctrl+Shift+P lists every command.
@@ -122,7 +127,7 @@ the main ones, and Ctrl+Shift+P lists every command.
 
 | Path | What |
 |---|---|
-| `libraries/core` | no UI: lossless XML and the canonical writer, node models, the workspace, undo, edits and refactors, variables, validation, layout, fuzzy search, the BehaviorTree.CPP check runner, runs (`.btlog`) |
+| `libraries/core` | no UI: lossless XML and the canonical writer, node models, the workspace, undo, edits and refactors, variables, validation, layout, fuzzy search, the BehaviorTree.CPP check runner, runs (`.btlog`) and the live link to doTask (ZeroMQ) |
 | `libraries/ui` | the panels (ImGui): canvas, inspector, variables, problems, finder, picker, dialogs, the run view; the theme loader is Nereus's |
 | `app` | the window, menus, dock layout and preferences (`~/.config/notgroot/notgroot.yaml`) |
 | `tools/check` | `notgroot-check` (BehaviorTree.CPP 4.10 with placeholder nodes) |

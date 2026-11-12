@@ -2,6 +2,7 @@
 // (theme, scale, layout, recent workspaces) kept in the config directory.
 #pragma once
 #include "file_picker.hpp"
+#include "notgroot/core/run_client.hpp"
 #include "notgroot/ui/session.hpp"
 #include "window.hpp"
 #include <filesystem>
@@ -13,6 +14,7 @@ namespace notgroot::app {
 struct Options {
     std::filesystem::path open;       // a trees directory or a tree file to open at start
     std::filesystem::path run;        // --run: a run (.btlog) to show at start
+    std::string connect;              // --connect: watch doTask's run monitor at host[:port] from the start
     std::string theme;                // --theme: overrides the preferences for this run
     std::filesystem::path screenshot; // --screenshot: save the frame after `frames` frames, then quit
     int frames = 0;                   // --frames: quit after this many frames (0: run until closed)
@@ -37,6 +39,11 @@ class App {
     void openWorkspace(const std::filesystem::path &);
     // Runs (.btlog): each opens in a session of its own, read-only, beside the editor's.
     void openRun(const std::filesystem::path &);
+    // Live runs: doTask's run monitor watched, each new run opened as the run when it starts.
+    void connectTo(const std::string &address);
+    void disconnect();
+    void pollLive();
+    void connectWindow();
     void hostCallbacks(ui::Session &);
     ui::Session &shown() {
         return showingRun_ && run_ ? *run_ : session_;
@@ -67,7 +74,15 @@ class App {
     bool placeRunPanels_ = false;      // dock the Run and Timeline panels once (layouts saved before they existed)
     int raiseRun_ = 0;        // frames left to bring the Run and Timeline tabs to the front (the first ones dock them)
     unsigned compared_ = ~0u; // the editor's workspace version the run's trees were compared with
-    FilePicker picker_, runPicker_;
+    FilePicker picker_, runPicker_, savePicker_;
+    core::RunClient live_;
+    std::string liveRun_;        // the run id live_ follows (run_ shows it while their ids match)
+    std::string liveStatus_;     // live_'s last word, for the Run panel before a run comes
+    bool showConnect_ = false;   // the Connect to doTask window
+    std::string connectAddress_; // what it holds
+    double lastBlackboard_ = -1; // when blackboards were last asked for, and for which instance
+    std::string askedBlackboard_;
+    bool placeBlackboard_ = false;    // dock the Blackboard panel once (layouts saved before it existed)
     std::vector<std::string> recent_; // recently opened workspaces
     bool closing_ = false;            // the user agreed to quit
     double lastPoll_ = 0;

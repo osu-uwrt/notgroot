@@ -83,8 +83,10 @@ App::App(Options options) : opt_(std::move(options)) {
     };
     picker_.setParent(0);
     runPicker_.setParent(0);
+    savePicker_.setParent(0);
     session_.horizontal = preference("layout") == "left-right";
     placeRunPanels_ = preference("run_panels_placed").empty();
+    placeBlackboard_ = preference("blackboard_placed").empty();
     if (!config_.empty() && fs::exists(config_ / "notgroot.yaml"))
         try {
             for (const auto &path : YAML::LoadFile((config_ / "notgroot.yaml").string())["recent"])
@@ -98,6 +100,8 @@ App::App(Options options) : opt_(std::move(options)) {
         openWorkspace(recent_.front());
     if (!opt_.run.empty())
         openRun(opt_.run);
+    if (!opt_.connect.empty())
+        connectTo(opt_.connect);
 
     // The getting-started tour on the first start (never in a --no-persist run: screenshots stay as asked).
     session_.tourDone = [this] { savePreference("tour_seen", "yes"); };
@@ -121,8 +125,32 @@ void App::hostCallbacks(ui::Session &session) {
             shown().status("No run open: Run > Open run (Ctrl+Shift+O)", true);
     };
     session.closeRun = [this] {
+        // The live run is what the link is for.
+        if (run_ && run_->runView->live && live_.active())
+            disconnect();
         run_.reset();
         showingRun_ = false;
+    };
+    session.connectLive = [this] {
+        connectAddress_ = preference("monitor_address");
+        if (connectAddress_.empty())
+            connectAddress_ = "orin2:1670";
+        showConnect_ = true;
+    };
+    session.disconnectLive = [this] { disconnect(); };
+    session.liveConnected = [this] { return live_.active(); };
+    session.saveLive = [this] {
+        if (!run_ || !run_->runView->live)
+            return;
+        // doTask's file name, in ~/btlogs when there is one.
+        const char *home = std::getenv("HOME");
+        fs::path folder = home ? fs::path(home) : fs::path();
+        if (!folder.empty() && fs::is_directory(folder / "btlogs"))
+            folder /= "btlogs";
+        const auto name = fs::path(run_->runView->live->info.log).filename();
+        if (!savePicker_.open("Save the run", folder / (name.empty() ? "live.btlog" : name), "BehaviorTree.CPP logs",
+                              {"*.btlog"}, false, true))
+            shown().status(savePicker_.hint(), true);
     };
     session.showSource = [this](const core::NodeRef &ref) {
         if (!run_)
@@ -142,6 +170,9 @@ void App::hostCallbacks(ui::Session &session) {
 }
 
 void App::openRun(const fs::path &path) {
+    // A file replaces the live run, so stop watching.
+    if (live_.active())
+        disconnect();
     auto session = std::make_unique<ui::Session>();
     std::string error;
     if (!session->loadBuiltinModels(content_ / "builtin_models.xml", error) || !ui::openRun(*session, path, error)) {
@@ -154,6 +185,98 @@ void App::openRun(const fs::path &path) {
     showingRun_ = true;
     raiseRun_ = 6;
     compared_ = ~0u;
+}
+
+void App::connectTo(const std::string &address) {
+    if (!live_.connect(address)) {
+        shown().status("Not an address: " + address + " (host, or host:port)", true);
+        return;
+    }
+    liveRun_.clear();
+    liveStatus_.clear();
+    showConnect_ = false;
+    savePreference("monitor_address", address);
+    shown().status("Watching " + live_.address() + ": its runs open here as they start");
+}
+
+void App::disconnect() {
+    live_.disconnect();
+    liveRun_.clear();
+    shown().status("Disconnected from doTask");
+}
+
+void App::pollLive() {
+    if (!live_.active())
+        return;
+    const auto isLive = [this] { return run_ && run_->runView->live && run_->runView->live->info.run == liveRun_; };
+    if (auto update = live_.take()) {
+        // A new run: shown now when a run was shown (or none was open), else announced.
+        if (update->started) {
+            liveRun_ = update->started->run;
+            auto session = std::make_unique<ui::Session>();
+            std::string error;
+            if (!session->loadBuiltinModels(content_ / "builtin_models.xml", error) ||
+                !ui::openLiveRun(*session, live_.address(), *update->started, update->xml, error))
+                shown().status("The live run can't be shown: " + error, true);
+            else {
+                hostCallbacks(*session);
+                session->horizontal = session_.horizontal;
+                const bool show = showingRun_ || !run_;
+                run_ = std::move(session);
+                compared_ = ~0u;
+                if (show) {
+                    showingRun_ = true;
+                    raiseRun_ = 8;
+                } else
+                    session_.status("A new run started on doTask: " + run_->runView->title + " (F6 shows it)");
+            }
+        }
+        if (isLive()) {
+            auto &live = *run_->runView->live;
+            ui::appendLive(*run_, update->transitions);
+            if (update->info && update->info->run == liveRun_)
+                live.info = *update->info;
+            live.online = update->online;
+            live.status = update->status;
+        }
+        liveStatus_ = update->status;
+    }
+    // The Blackboard panel's instance, four times a second while it is shown (at once when it shows another).
+    if (!isLive())
+        return;
+    auto &live = *run_->runView->live;
+    if (auto reply = live_.takeBlackboards(); reply && reply->run == liveRun_) {
+        live.blackboards = std::move(reply->values);
+        live.blackboardError = reply->error;
+    }
+    if (live.blackboardShown && (live.blackboardPath != askedBlackboard_ || ImGui::GetTime() - lastBlackboard_ > .25)) {
+        lastBlackboard_ = ImGui::GetTime();
+        askedBlackboard_ = live.blackboardPath;
+        live_.askBlackboards(liveRun_, {live.blackboardPath});
+    }
+    live.blackboardShown = false;
+}
+
+void App::connectWindow() {
+    if (!showConnect_)
+        return;
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, {.5f, .5f});
+    if (ImGui::Begin("Connect to doTask", &showConnect_,
+                     ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize)) {
+        ui::dismissible(showConnect_);
+        ImGui::TextUnformatted("doTask's run monitor, host or host:port (1670 unless doTask was told otherwise):");
+        if (ImGui::IsWindowAppearing())
+            ImGui::SetKeyboardFocusHere();
+        ImGui::SetNextItemWidth(ui::ui(320));
+        const bool enter = ui::inputString("##address", connectAddress_, ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::TextDisabled("orin2 for Talos, localhost for a sim on this computer");
+        if (ImGui::Button("Connect") || enter)
+            connectTo(connectAddress_);
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+            showConnect_ = false;
+    }
+    ImGui::End();
 }
 
 void App::openWorkspace(const fs::path &path) {
@@ -198,7 +321,7 @@ void App::quit() {
 void App::updateTitle() {
     std::string title = "notgroot";
     if (showingRun_ && run_)
-        title = "RUN " + run_->runView->title + " — notgroot";
+        title = (run_->runView->live ? "LIVE " : "RUN ") + run_->runView->title + " — notgroot";
     else if (session_.workspace.isOpen())
         title = (session_.workspace.anyEdited() ? "• " : "") + session_.workspace.directory().string() +
                 (session_.active.empty() ? "" : " — " + session_.active) + " — notgroot";
@@ -439,14 +562,24 @@ void App::frame() {
         openWorkspace(*picked);
     if (auto picked = runPicker_.take())
         openRun(*picked);
+    if (auto picked = savePicker_.take(); picked && run_ && run_->runView->live) {
+        std::string error;
+        if (ui::saveRun(*run_->runView, *picked, error))
+            shown().status("Saved the run to " + picked->string() +
+                           (run_->runView->live->info.ended ? "" : " (so far: it is still running)"));
+        else
+            shown().status(error, true);
+    }
+    pollLive();
     // A run: compared with the editor's trees whenever they change, and played on.
     if (run_ && compared_ != session_.workspace.version()) {
         compared_ = session_.workspace.version();
         ui::compareTrees(*run_->runView, run_->workspace, session_.workspace);
     }
     const bool playing = run_ && ui::advanceRun(*run_, double(ImGui::GetIO().DeltaTime));
+    // Live: drawn as often as the link polls.
     if (opt_.screenshot.empty())
-        window_->setIdleWait(playing ? 0 : 0.5);
+        window_->setIdleWait(playing ? 0 : live_.active() ? 0.05 : 0.5);
     if (ImGui::GetTime() - lastPoll_ > 1) {
         lastPoll_ = ImGui::GetTime();
         session_.pollDisk();
@@ -457,11 +590,13 @@ void App::frame() {
     menuBar();
     statusBar();
     dockspace();
-    // A run just opened: its tabs in front, one a frame (a dock node selects the tab of the window last focused),
-    // once the layout has settled; then the canvas takes the keys.
+    // A run just opened: its tabs in front (a live one's Blackboard too), one a frame (a dock node selects the tab of
+    // the window last focused), once the layout has settled; then the canvas takes the keys.
     if (raiseRun_ > 0) {
         --raiseRun_;
-        if (raiseRun_ < 3)
+        if (raiseRun_ == 3 && run_ && run_->runView->live)
+            ImGui::SetWindowFocus("Blackboard");
+        else if (raiseRun_ < 3)
             ImGui::SetWindowFocus(raiseRun_ == 2 ? "Run" : raiseRun_ == 1 ? "Timeline" : "Canvas");
     }
     const auto panel = [&](const char *name, void (*draw)(ui::Session &), ImGuiWindowFlags flags = 0) {
@@ -477,19 +612,27 @@ void App::frame() {
     };
     // A layout saved before these panels existed has no place for them: once, they dock beside a panel it has (Run
     // with Trees, Timeline with Problems) instead of floating. Moved after that, they stay where they are put.
-    bool placed = false;
+    bool placed = false, placedBlackboard = false;
     const auto runPanel = [&](const char *name, const char *beside, void (*draw)(ui::Session &)) {
-        if (const auto *other = ImGui::FindWindowByName(beside); placeRunPanels_ && other && other->DockId) {
+        const bool blackboard = std::strcmp(name, "Blackboard") == 0;
+        if (const auto *other = ImGui::FindWindowByName(beside);
+            (blackboard ? placeBlackboard_ : placeRunPanels_) && other && other->DockId) {
             ImGui::SetNextWindowDockID(other->DockId);
-            placed = true;
+            (blackboard ? placedBlackboard : placed) = true;
         }
         if (ImGui::Begin(name, nullptr)) {
             if (run_)
                 draw(*run_);
             else {
-                ui::emptyState("No run open. Open a .btlog (Ctrl+Shift+O): doTask writes one per run to ~/btlogs.");
+                ui::emptyState("No run open. Open a .btlog (Ctrl+Shift+O): doTask writes one per run to ~/btlogs. Or "
+                               "watch doTask live (F5).");
+                if (live_.active())
+                    ImGui::TextDisabled("%s: %s", live_.address().c_str(), liveStatus_.c_str());
                 if (ImGui::Button("Open run…"))
                     session_.run("run.open");
+                ImGui::SameLine();
+                if (live_.active() ? ImGui::Button("Disconnect") : ImGui::Button("Connect to doTask…"))
+                    session_.run(live_.active() ? "run.disconnect" : "run.connect");
             }
         }
         ImGui::End();
@@ -511,9 +654,14 @@ void App::frame() {
     panel("Problems", ui::drawProblems);
     runPanel("Run", "Trees", ui::drawRunPanel);
     runPanel("Timeline", "Problems", ui::drawTimeline);
+    runPanel("Blackboard", "Variables", ui::drawBlackboard);
     if (placed) {
         placeRunPanels_ = false;
         savePreference("run_panels_placed", "yes");
+    }
+    if (placedBlackboard) {
+        placeBlackboard_ = false;
+        savePreference("blackboard_placed", "yes");
     }
 
     ui::drawFinder(shown());
@@ -522,6 +670,7 @@ void App::frame() {
     ui::drawShortcuts(shown());
     ui::drawTour(session_);
     aboutWindow();
+    connectWindow();
     ui::handleShortcuts(shown());
     updateTitle();
 }
@@ -544,6 +693,7 @@ void App::defaultLayout(unsigned dock) {
     ImGui::DockBuilderDockWindow("Canvas", center);
     ImGui::DockBuilderDockWindow("Inspector", rightTop);
     ImGui::DockBuilderDockWindow("Variables", rightBottom);
+    ImGui::DockBuilderDockWindow("Blackboard", rightBottom);
     ImGui::DockBuilderDockWindow("Problems", bottom);
     ImGui::DockBuilderDockWindow("Timeline", bottom);
     ImGui::DockBuilderFinish(dock);
@@ -587,7 +737,8 @@ void App::statusBar() {
                                said.statusText.c_str());
         else if (&said != &session_)
             ImGui::TextDisabled("P play · , . step · [ ] failures · F follow · Enter into subtree · Backspace up · "
-                                "F6 editor");
+                                "F6 editor%s",
+                                App::shown().runView && App::shown().runView->live ? " · Ctrl+S save run" : "");
         else
             ImGui::TextDisabled("Ctrl+P find · Ctrl+Shift+P commands · Tab add child · Enter edit · Space fold / "
                                 "open subtree · F8 next problem");

@@ -1,12 +1,15 @@
 // Viewing a run (core/run.hpp) like a debugger: the run's trees open read-only in their own Session, the canvas shows
 // one subtree instance at a time (a frame) with each card's status at the playhead, the Run panel lists the instances
-// as a call stack, and the Timeline plays, scrubs and steps through the transitions.
+// as a call stack, and the Timeline plays, scrubs and steps through the transitions. A live run (from doTask's run
+// monitor, core/run_client.hpp) is the same, growing, with its blackboards.
 #pragma once
 #include "notgroot/core/run.hpp"
+#include "notgroot/core/run_client.hpp"
 #include "notgroot/ui/session.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 
@@ -26,10 +29,32 @@ struct RunView {
     bool revealFrame = true;                 // the Run panel scrolls to the frame's row
     std::int64_t shownFrom = 0, shownTo = 0; // the Timeline's span (equal: the whole run)
     core::NodeRef running;                   // the frame's deepest running node last shown (Follow keeps it in view)
+
+    // Watched live (none: a file).
+    struct Live {
+        std::string address; // tcp://orin2:1670
+        core::RunInfo info;
+        std::string xml; // the header as it came (Save run writes it back)
+        bool online = false;
+        std::string status;
+        // Blackboards of the instance the Blackboard panel shows (by path), and whether it was drawn this frame.
+        std::string blackboardPath;
+        core::Blackboards blackboards;
+        std::string blackboardError;
+        bool blackboardShown = false;
+    };
+    std::optional<Live> live;
 };
 
 // Opens a .btlog in a session made for it; false and `error` when it can't be read.
 bool openRun(Session &, const std::filesystem::path &, std::string &error);
+// Opens a run that has just started on doTask (its header XML), at its live end with Follow on.
+bool openLiveRun(Session &, const std::string &address, const core::RunInfo &, const std::string &xml,
+                 std::string &error);
+// More of a live run: the playhead stays at the live end when it was there.
+void appendLive(Session &, const std::vector<core::Transition> &);
+// The live run as a .btlog (what doTask writes, so far).
+bool saveRun(const RunView &, const std::filesystem::path &, std::string &error);
 
 ImVec4 runStatusColor(core::RunStatus);
 const char *runStatusName(core::RunStatus);
@@ -59,4 +84,6 @@ void drawRunPanel(Session &);
 void drawTimeline(Session &);
 // Above the canvas while viewing a run: where the frame is (click a caller to go up to it).
 void drawBreadcrumb(Session &);
+// The blackboard of the cursor's subtree instance, live only.
+void drawBlackboard(Session &);
 } // namespace notgroot::ui

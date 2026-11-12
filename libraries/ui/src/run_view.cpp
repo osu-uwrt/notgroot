@@ -4,6 +4,8 @@
 #include "notgroot/ui/theme.hpp"
 #include <algorithm>
 #include <cmath>
+#include <ctime>
+#include <fstream>
 #include <functional>
 #include <map>
 
@@ -183,6 +185,63 @@ bool openRun(Session &session, const std::filesystem::path &path, std::string &e
     return true;
 }
 
+bool openLiveRun(Session &session, const std::string &address, const RunInfo &info, const std::string &xml,
+                 std::string &error) {
+    auto view = std::make_shared<RunView>();
+    if (!view->run.load(xml, error))
+        return false;
+    const std::filesystem::path name = info.log.empty() ? "live.btlog" : info.log;
+    if (!session.openText(name, view->run.definitions(), error))
+        return false;
+    view->file = name;
+    const std::time_t start = std::time_t(info.startUsec / 1000000);
+    std::tm local{};
+    localtime_r(&start, &local);
+    char when[32];
+    std::strftime(when, sizeof(when), "%m-%d %H:%M:%S", &local);
+    view->title = std::string(when) + " · " + view->run.mission();
+    view->live = RunView::Live{address, info, xml, true, "live", {}, {}, {}, false};
+    view->follow = true;
+    session.attachRun(view);
+    focusFrame(session, 0);
+    return true;
+}
+
+void appendLive(Session &session, const std::vector<Transition> &more) {
+    auto &view = viewOf(session);
+    if (more.empty())
+        return;
+    const auto before = view.run.duration();
+    const bool atEnd = !view.playing && view.state.applied >= view.run.transitions().size();
+    const bool whole = view.shownTo <= view.shownFrom || (view.shownFrom == 0 && view.shownTo >= before);
+    const bool trailing = view.shownTo >= before;
+    view.run.append(more);
+    // The Timeline keeps showing the whole run, or keeps its end in view.
+    if (whole)
+        view.shownFrom = view.shownTo = 0;
+    else if (trailing && atEnd) {
+        const auto shift = view.run.duration() - before;
+        view.shownFrom += shift;
+        view.shownTo += shift;
+    }
+    if (atEnd)
+        seekTransitions(session, view.run.transitions().size());
+}
+
+bool saveRun(const RunView &view, const std::filesystem::path &path, std::string &error) {
+    if (!view.live) {
+        error = "Only a live run needs saving: this one is a file already";
+        return false;
+    }
+    std::ofstream out(path, std::ios::binary);
+    out << writeRunLog(view.live->xml, view.live->info.startUsec, view.run.transitions());
+    if (!out.flush()) {
+        error = "Cannot write " + path.string();
+        return false;
+    }
+    return true;
+}
+
 ImVec4 runStatusColor(RunStatus status) {
     switch (status) {
     case RunStatus::Running:
@@ -340,7 +399,10 @@ void drawBreadcrumb(Session &session) {
         chain.insert(chain.begin(), i);
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {ui(4), ImGui::GetStyle().ItemSpacing.y});
     ImGui::AlignTextToFramePadding();
-    ImGui::TextColored(palette().warn, "RUN");
+    if (view.live)
+        ImGui::TextColored(view.live->online ? palette().error : palette().muted, "LIVE");
+    else
+        ImGui::TextColored(palette().warn, "RUN");
     for (const int i : chain) {
         ImGui::SameLine();
         ImGui::TextDisabled(i == chain.front() ? "" : "›");
@@ -369,7 +431,7 @@ void drawRunPanel(Session &session) {
     auto &view = viewOf(session);
     const auto &run = view.run;
     ImGui::TextUnformatted(view.title.c_str());
-    if (ImGui::IsItemHovered())
+    if (ImGui::IsItemHovered() && !view.live)
         ImGui::SetTooltip("%s", view.file.string().c_str());
     const auto result = run.status(view.state, 0);
     ImGui::TextDisabled("%s · %zu nodes · %zu transitions", clockText(run.duration()).c_str(), run.nodeCount(),
@@ -377,6 +439,29 @@ void drawRunPanel(Session &session) {
     if (result != RunStatus::Idle) {
         ImGui::SameLine();
         ImGui::TextColored(runStatusColor(result), "%s", runStatusName(result));
+    }
+    if (view.live) {
+        const auto &live = *view.live;
+        const bool connected = session.liveConnected && session.liveConnected();
+        // Red while it records, amber while the link is down.
+        dot(!connected || live.info.ended ? palette().muted : live.online ? palette().error : palette().warn, ui(4));
+        ImGui::SameLine();
+        if (!connected)
+            ImGui::TextDisabled("was live from %s", live.address.c_str());
+        else if (live.info.ended)
+            ImGui::TextDisabled("%s: ended %s", live.address.c_str(), live.info.result.c_str());
+        else
+            ImGui::TextDisabled("%s: %s", live.address.c_str(), live.status.c_str());
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("doTask's log: %s", live.info.log.c_str());
+        if (ImGui::SmallButton("Save run…"))
+            session.run("run.save");
+        ImGui::SameLine();
+        if (connected && ImGui::SmallButton("Disconnect"))
+            session.run("run.disconnect");
+        else if (!connected && ImGui::SmallButton("Connect…"))
+            session.run("run.connect");
+        ImGui::SameLine();
     }
     if (ImGui::SmallButton("Editor (F6)"))
         session.run("run.switch");
@@ -742,5 +827,55 @@ void drawTimeline(Session &session) {
         const auto shift = std::int64_t(double(sideways) * span / 10);
         showSpan(view, view.shownFrom - shift, view.shownTo - shift);
     }
+}
+void drawBlackboard(Session &session) {
+    auto &view = viewOf(session);
+    if (!view.live) {
+        emptyState("Blackboards are only seen live: connect to doTask (Run > Connect to doTask, F5).");
+        return;
+    }
+    auto &live = *view.live;
+    live.blackboardShown = true;
+    int instance = cardInstance(session, session.cursor);
+    if (instance < 0)
+        instance = view.frame;
+    const auto &shown = instanceAt(view, instance);
+    live.blackboardPath = shown.path;
+    ImGui::TextUnformatted(shown.label.c_str());
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", shown.path.empty() ? "(main tree)" : shown.path.c_str());
+    if (!live.blackboardError.empty()) {
+        emptyState(live.blackboardError == "run ended" ? "The run has ended: its blackboards went with the tree."
+                                                       : live.blackboardError.c_str());
+        return;
+    }
+    const auto found = live.blackboards.find(shown.path);
+    if (found == live.blackboards.end()) {
+        ImGui::TextDisabled(session.liveConnected && session.liveConnected() ? "asking…" : "not connected");
+        return;
+    }
+    if (found->second.empty()) {
+        emptyState("Nothing on this blackboard.");
+        return;
+    }
+    const auto flags =
+        ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp;
+    if (!ImGui::BeginTable("##blackboard", 2, flags))
+        return;
+    ImGui::TableSetupScrollFreeze(0, 1);
+    ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthStretch, 1);
+    ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 2);
+    tableHeaders();
+    for (const auto &[key, value] : found->second) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        const bool highlighted = key == session.highlightKey;
+        ImGui::TextColored(highlighted ? palette().accent : session.keyColor(shown.id, key), "%s", key.c_str());
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(value.c_str());
+        if (ImGui::IsItemHovered() && ImGui::CalcTextSize(value.c_str()).x > ImGui::GetColumnWidth())
+            ImGui::SetTooltip("%s", value.c_str());
+    }
+    ImGui::EndTable();
 }
 } // namespace notgroot::ui
