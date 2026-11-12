@@ -1,10 +1,11 @@
 # notgroot ↔ riptide_autonomy file contract
 
-Version 6. Both sides follow this document; a change is agreed by both, then the version here goes up and
+Version 7. Both sides follow this document; a change is agreed by both, then the version here goes up and
 riptide_autonomy's README summary is updated to match.
 
 notgroot edits the XML that riptide_autonomy's `doTask` runs with BehaviorTree.CPP 4 (apt
-`ros-humble-behaviortree-cpp`, 4.10). There is no other channel between them: the files below are the API.
+`ros-humble-behaviortree-cpp`, 4.10). The files below are the API; the only other channel is the read-only run
+monitor (§8).
 
 ## 1. Workspace layout
 
@@ -141,3 +142,21 @@ BT.CPP ignores comments; riptide_autonomy tools must keep them.
 - Each goal writes a BehaviorTree.CPP `FileLogger2` log, `<log_file_dir>/BTLog_<date>_<time>.btlog` (default
   `~/btlogs`), which notgroot replays. Its header is the instantiated tree (one `<BehaviorTree>` per subtree
   instance, `_uid` on every node, `_fullpath` on instances and calls), so a log is read without the trees folder.
+- `doTask` parameters `enable_tree_monitor` (bool, default `true`) and `tree_monitor_port` (int, default `1670`)
+  serve a read-only **run monitor** on a ZeroMQ REP socket for the whole process. If the port is taken it only warns.
+  It holds the latest run (the `.btlog`'s header and transitions) until the next one starts, so a client that
+  connects late or after the end still gets all of it. Any number of clients; nothing they send changes the tree.
+  Requests are multipart, first frame the command; replies start with `OK`, `NONE` or `ERR` (then the reason):
+  - `RUN` → `NONE` before the first run, else `OK` and JSON `{protocol: 1, run, mission, log, start_usec,
+    xml_bytes, transitions, ended, result}`. `run` is an id (text); `result` is `RUNNING` until the end, then
+    `SUCCESS`, `FAILURE`, `CANCELED` or `ERROR`.
+  - `TREE`, run → `OK` and the `.btlog` header XML, zlib-compressed (`xml_bytes` long uncompressed).
+  - `TRANS`, run, from → `OK`, JSON `{from, to, count, ended, result}`, then records `from` to `to` (at most 65536)
+    in the `.btlog` format: 9 bytes each, 6-byte µs offset from `start_usec`, `u16` uid, `u8` status, little
+    endian. Ask again from `to`; the run is complete once `ended` and `to == count`.
+  - `BB`, run, path... → `OK` and JSON `{path: {key: value}}` for each subtree instance `_fullpath` asked for (the
+    main tree's is empty); `ERR run ended` once the tree is gone.
+  - A run id that is not the latest gets `ERR unknown run`.
+
+  Header and records match the `.btlog` except that a timestamp may differ from the file's by 1 µs: FileLogger2
+  keeps its start time to the nanosecond and the file only to the microsecond.
