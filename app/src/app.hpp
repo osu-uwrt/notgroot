@@ -71,6 +71,7 @@ class App {
     ui::Session session_;
     std::unique_ptr<ui::Session> run_; // the run open, if any
     bool showingRun_ = false;          // the canvas, inspector and variables show the run
+    bool closeRun_ = false;            // closed at the next frame's start: the run's own panel asks while drawing it
     bool placeRunPanels_ = false;      // dock the Run and Timeline panels once (layouts saved before they existed)
     int raiseRun_ = 0;        // frames left to bring the Run and Timeline tabs to the front (the first ones dock them)
     unsigned compared_ = ~0u; // the editor's workspace version the run's trees were compared with

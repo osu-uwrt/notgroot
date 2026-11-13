@@ -131,6 +131,8 @@ doTask writes a log of every run to `~/btlogs` (`BTLog_<date>_<time>.btlog`). Op
 as they ran: it opens beside the editor, read-only. The canvas shows one subtree instance at a time, its cards tinted
 with their status at the playhead (amber running, green success, red failure; faded once idle again). Showing an
 instance while it runs puts the cursor on its deepest running node, in view; with Follow on, the view keeps up with it.
+The Timeline and Blackboard panels show only with the run; in the editor (F6, or Close run) Problems and Variables
+are back in their places.
 
 Connected to doTask (F5), each run opens as it starts and grows as it runs; the playhead stays at the live end until
 you move it back (`>|` catches up again). The Blackboard panel shows the blackboard of the cursor's subtree instance.

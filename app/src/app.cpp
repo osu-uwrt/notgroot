@@ -119,18 +119,14 @@ void App::hostCallbacks(ui::Session &session) {
             shown().status(runPicker_.hint(), true);
     };
     session.switchView = [this] {
-        if (run_)
+        if (run_) {
             showingRun_ = !showingRun_;
-        else
+            if (showingRun_)
+                raiseRun_ = 6;
+        } else
             shown().status("No run open: Run > Open run (Ctrl+Shift+O)", true);
     };
-    session.closeRun = [this] {
-        // The live run is what the link is for.
-        if (run_ && run_->runView->live && live_.active())
-            disconnect();
-        run_.reset();
-        showingRun_ = false;
-    };
+    session.closeRun = [this] { closeRun_ = true; };
     session.connectLive = [this] {
         connectAddress_ = preference("monitor_address");
         if (connectAddress_.empty())
@@ -566,6 +562,15 @@ void App::frame() {
                 io.AddKeyEvent(ImGuiKey(mod), false);
         pendingRelease_ = {ImGuiKey_None, 0};
     }
+    // Back to the editor. The live run is what the link is for.
+    if (closeRun_) {
+        closeRun_ = false;
+        if (run_ && run_->runView->live && live_.active())
+            disconnect();
+        run_.reset();
+        showingRun_ = false;
+        raiseRun_ = 0;
+    }
     // Files picked in the desktop dialog, and files changed on disk (checked once a second).
     if (auto picked = picker_.take())
         openWorkspace(*picked);
@@ -624,6 +629,9 @@ void App::frame() {
     bool placed = false, placedBlackboard = false;
     const auto runPanel = [&](const char *name, const char *beside, void (*draw)(ui::Session &)) {
         const bool blackboard = std::strcmp(name, "Blackboard") == 0;
+        // Timeline and Blackboard share docks with Problems and Variables: they only show with the run.
+        if (std::strcmp(name, "Run") != 0 && !(showingRun_ && run_))
+            return;
         if (const auto *other = ImGui::FindWindowByName(beside);
             (blackboard ? placeBlackboard_ : placeRunPanels_) && other && other->DockId) {
             ImGui::SetNextWindowDockID(other->DockId);
