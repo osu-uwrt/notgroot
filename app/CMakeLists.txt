@@ -8,7 +8,7 @@ add_executable(notgroot
 # without those pinch.cpp builds as a stub.
 if(APPLE)
   enable_language(OBJCXX)
-  target_sources(notgroot PRIVATE src/pinch_cocoa.mm)
+  target_sources(notgroot PRIVATE src/pinch_cocoa.mm src/dock_icon_cocoa.mm) # and the Dock icon
   target_link_libraries(notgroot PRIVATE "-framework AppKit")
 else()
   target_sources(notgroot PRIVATE src/pinch.cpp)
