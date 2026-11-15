@@ -59,13 +59,13 @@ struct FilePicker::State {
 };
 
 FilePicker::FilePicker() : state_(std::make_shared<State>()) {
-#ifdef __APPLE__
-    program_ = "osascript"; // AppleScript's own dialogs, always there
-    return;
-#endif
     program_ = onPath("zenity");
     if (program_.empty())
         program_ = onPath("kdialog");
+#ifdef __APPLE__
+    if (program_.empty())
+        program_ = "osascript"; // AppleScript's own dialogs, always there
+#endif
 }
 
 FilePicker::~FilePicker() {

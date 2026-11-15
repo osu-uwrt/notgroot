@@ -1,5 +1,5 @@
-// The desktop's "open file" dialog (osascript on macOS, else zenity or kdialog), run as its own process so the editor keeps drawing
-// while it is open: the UI thread opens it, then polls for the file picked.
+// The desktop's "open file" dialog (zenity, else kdialog, else osascript on macOS), run as its own process so the
+// editor keeps drawing while it is open: the UI thread opens it, then polls for the file picked.
 #pragma once
 #include <filesystem>
 #include <memory>
@@ -10,7 +10,7 @@
 namespace notgroot::app {
 class FilePicker {
   public:
-    // Finds the picker program on PATH (zenity, else kdialog; osascript on macOS).
+    // Finds the picker program on PATH (zenity, else kdialog, else osascript on macOS).
     FilePicker();
     ~FilePicker(); // closes a dialog that is still open
     FilePicker(const FilePicker &) = delete;
