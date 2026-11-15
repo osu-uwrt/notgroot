@@ -28,6 +28,19 @@ std::string onPath(const std::string &name) {
     return {};
 }
 
+// pipe2(O_CLOEXEC), which macOS doesn't have.
+bool cloexecPipe(int fds[2]) {
+#ifdef __APPLE__
+    if (pipe(fds) != 0)
+        return false;
+    fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+    fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+    return true;
+#else
+    return pipe2(fds, O_CLOEXEC) == 0;
+#endif
+}
+
 std::string joined(const std::vector<std::string> &items) {
     std::string result;
     for (const auto &item : items)
@@ -46,6 +59,10 @@ struct FilePicker::State {
 };
 
 FilePicker::FilePicker() : state_(std::make_shared<State>()) {
+#ifdef __APPLE__
+    program_ = "osascript"; // AppleScript's own dialogs, always there
+    return;
+#endif
     program_ = onPath("zenity");
     if (program_.empty())
         program_ = onPath("kdialog");
@@ -61,6 +78,33 @@ std::vector<std::string> FilePicker::command(const std::string &program, const s
                                              const std::string &start, const std::string &kind,
                                              const std::vector<std::string> &patterns, unsigned long parent,
                                              bool folder, bool save) {
+    if (program == "osascript") {
+        // The values go in as arguments (argv), so nothing needs quoting. A file to preselect starts in its folder
+        const bool inFolder = !start.empty() && start.back() == '/';
+        const std::string where = inFolder ? start : fs::path(start).parent_path().string();
+        std::string pick = "choose file with prompt (item 1 of argv) default location (POSIX file (item 2 of argv))";
+        std::vector<std::string> extra;
+        if (folder)
+            pick = "choose folder with prompt (item 1 of argv) default location (POSIX file (item 2 of argv))";
+        else if (save) {
+            pick = "choose file name with prompt (item 1 of argv) default location (POSIX file (item 2 of argv)) "
+                   "default name (item 3 of argv)";
+            extra.push_back(fs::path(start).filename().string());
+        } else {
+            // *.yaml -> yaml; a bare * means anything
+            for (const auto &pattern : patterns)
+                if (pattern.rfind("*.", 0) == 0)
+                    extra.push_back(pattern.substr(2));
+            if (!extra.empty())
+                pick += " of type (items 3 thru -1 of argv)";
+        }
+        std::vector<std::string> args{"osascript",   "-e", "on run argv", "-e", "POSIX path of (" + pick + ")",
+                                      "-e",          "end run",          title, where.empty() ? "/" : where};
+        args.insert(args.end(), extra.begin(), extra.end());
+        (void)kind;
+        (void)parent;
+        return args;
+    }
     if (program == "kdialog") {
         std::vector<std::string> args{"kdialog", "--title",
                                       title,     "--getopenfilename",
@@ -111,7 +155,7 @@ bool FilePicker::open(const std::string &title, const fs::path &start, const std
 
     // The dialog writes the path to stdout; its stderr (GTK chatter) goes nowhere.
     int out[2];
-    if (pipe2(out, O_CLOEXEC) != 0)
+    if (!cloexecPipe(out))
         return false;
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
