@@ -3,10 +3,17 @@ add_executable(notgroot
   src/main.cpp
   src/app.cpp
   src/window.cpp
-  src/pinch.cpp
   src/file_picker.cpp)
-# Touchpad pinches need XInput 2.4 (libXi 1.8 headers); without them pinch.cpp builds as a stub.
-find_package(X11 COMPONENTS Xi)
+# Touchpad pinches: the trackpad's magnify events on macOS (pinch_cocoa.mm), else XInput 2.4 (libXi 1.8 headers);
+# without those pinch.cpp builds as a stub.
+if(APPLE)
+  enable_language(OBJCXX)
+  target_sources(notgroot PRIVATE src/pinch_cocoa.mm)
+  target_link_libraries(notgroot PRIVATE "-framework AppKit")
+else()
+  target_sources(notgroot PRIVATE src/pinch.cpp)
+  find_package(X11 COMPONENTS Xi)
+endif()
 include(CheckSymbolExists)
 if(X11_Xi_FOUND)
   set(CMAKE_REQUIRED_INCLUDES ${X11_INCLUDE_DIR})
