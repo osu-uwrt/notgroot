@@ -782,7 +782,7 @@ void Session::registerCommands() {
                  status("Can't make it global: " + editor.error(), true);
          },
          onEditable,
-         [this, at, onEditable] {
+         [at, onEditable] {
              const auto *element = at();
              return onEditable() && element && (nodeId(*element) == "SetBlackboardV3" || nodeId(*element) == "Format");
          }});

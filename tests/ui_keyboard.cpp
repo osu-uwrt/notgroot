@@ -24,6 +24,7 @@ class Harness : public ::testing::Test {
         io.IniFilename = nullptr;
         io.DisplaySize = {1600, 1000};
         io.DeltaTime = 1.f / 60;
+        io.ConfigMacOSXBehaviors = false; // keys as on Linux: macOS ImGui swaps the Ctrl the tests press for Cmd
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         io.Fonts->AddFontDefault();
         unsigned char *pixels = nullptr;

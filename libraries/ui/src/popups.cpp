@@ -68,7 +68,7 @@ int chooser(const char *id, std::string &query, const std::vector<Choice> &choic
         if (ImGui::Selectable("##row", i == selected, 0, {0, ImGui::GetTextLineHeight()}))
             taken = int(ranked[std::size_t(i)].index);
         if (i == selected &&
-            ImGui::IsKeyPressed(ImGuiKey_DownArrow, true) | ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+            (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true) || ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)))
             ImGui::SetScrollHereY();
         auto *draw = ImGui::GetWindowDrawList();
         float x = at.x;

@@ -2,8 +2,11 @@
 #include "notgroot/core/validate.hpp"
 #include "notgroot/core/globals.hpp"
 #include "notgroot/core/variables.hpp"
+#include <cctype>
+#include <cerrno>
 #include <charconv>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <set>
 
@@ -32,9 +35,20 @@ std::string literalType(const std::string &text) {
         if (error == std::errc() && at == end)
             return "int";
     }
+#ifdef __APPLE__
+    // libc++ has no floating from_chars before macOS 26. strtod takes more (spaces, +, hex), so rule those out
+    if (std::isspace(static_cast<unsigned char>(*begin)) || *begin == '+' ||
+        text.find_first_of("xX") != std::string::npos)
+        return "";
+    char *at = nullptr;
+    errno = 0;
+    std::strtod(begin, &at);
+    return errno == 0 && at == end ? "double" : "";
+#else
     double real = 0;
     const auto [at, error] = std::from_chars(begin, end, real);
     return error == std::errc() && at == end ? "double" : "";
+#endif
 }
 
 namespace {
@@ -196,7 +210,8 @@ void checkTree(const Workspace &workspace, const TreeEntry &entry, std::vector<P
 // A subtree that calls itself, directly or through others, never finishes loading.
 void checkCycles(const Workspace &workspace, std::vector<Problem> &out) {
     std::map<std::string, std::vector<std::string>> calls;
-    for (const auto &[key, entry] : workspace.trees()) {
+    for (const auto &tree : workspace.trees()) {
+        const auto &key = tree.first; // lambdas can't capture structured bindings before C++20
         std::function<void(const Element &)> collect = [&](const Element &element) {
             for (const auto *child : element.elements()) {
                 if (isSubTree(*child))
@@ -204,7 +219,7 @@ void checkCycles(const Workspace &workspace, std::vector<Problem> &out) {
                 collect(*child);
             }
         };
-        collect(*entry.tree);
+        collect(*tree.second.tree);
     }
     std::map<std::string, int> state; // 1 visiting, 2 done
     std::set<std::string> reported;

@@ -14,6 +14,21 @@ extern char **environ;
 namespace fs = std::filesystem;
 
 namespace notgroot::core {
+namespace {
+// pipe2(O_CLOEXEC), which macOS doesn't have.
+bool cloexecPipe(int fds[2]) {
+#ifdef __APPLE__
+    if (pipe(fds) != 0)
+        return false;
+    fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+    fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+    return true;
+#else
+    return pipe2(fds, O_CLOEXEC) == 0;
+#endif
+}
+} // namespace
+
 struct BtCheck::State {
     std::mutex mutex;
     bool running = false;
@@ -100,7 +115,7 @@ bool BtCheck::start(const Workspace &workspace) {
         int out[2];
         Result result;
         std::string text;
-        if (pipe2(out, O_CLOEXEC) == 0) {
+        if (cloexecPipe(out)) {
             posix_spawn_file_actions_t actions;
             posix_spawn_file_actions_init(&actions);
             posix_spawn_file_actions_adddup2(&actions, out[1], STDOUT_FILENO);

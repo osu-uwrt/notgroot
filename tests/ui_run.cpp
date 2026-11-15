@@ -21,6 +21,7 @@ class RunHarness : public ::testing::Test {
         io.IniFilename = nullptr;
         io.DisplaySize = {1600, 1000};
         io.DeltaTime = 1.f / 60;
+        io.ConfigMacOSXBehaviors = false; // keys as on Linux: macOS ImGui swaps the Ctrl the tests press for Cmd
         io.Fonts->AddFontDefault();
         unsigned char *pixels = nullptr;
         int w = 0, h = 0;
@@ -389,7 +390,8 @@ TEST_F(RunHarness, RealTreesMatchWhereTheyHaveNotChanged) {
     core::Workspace editor;
     test::openWorkspace(editor, trees);
     ui::compareTrees(view(), session.workspace, editor);
-    for (const auto &[key, entry] : session.workspace.trees()) {
+    for (const auto &tree : session.workspace.trees()) {
+        const auto &key = tree.first; // lambdas can't capture structured bindings before C++20
         if (view().drifted.count(key) || key == run().mainTree())
             continue;
         // Every node maps onto a node of the same type.
