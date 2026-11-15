@@ -5,6 +5,7 @@
 #include "notgroot/core/validate.hpp"
 #include "notgroot/core/variables.hpp"
 #include "test_support.hpp"
+#include <algorithm>
 #include <fstream>
 #include <gtest/gtest.h>
 

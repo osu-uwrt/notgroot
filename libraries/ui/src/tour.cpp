@@ -3,6 +3,7 @@
 #include "notgroot/ui/panels.hpp"
 #include "notgroot/ui/style.hpp"
 #include "notgroot/ui/theme.hpp"
+#include <algorithm>
 #include <cfloat>
 #include <string>
 #include <vector>
