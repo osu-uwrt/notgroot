@@ -35,8 +35,7 @@ Window::Window(int width, int height, const std::string &titleText, bool hidden)
     // The size is at 100 %: on a scaled desktop the window opens that size in the desktop's units, or maximized
     // when that would not fit the screen.
     if (!hidden) {
-        float scaleX = 1, scaleY = 1;
-        glfwGetWindowContentScale(window_, &scaleX, &scaleY);
+        const float scaleX = contentScale(), scaleY = scaleX;
         int areaX = 0, areaY = 0, areaW = 0, areaH = 0;
         if (GLFWmonitor *monitor = glfwGetPrimaryMonitor())
             glfwGetMonitorWorkarea(monitor, &areaX, &areaY, &areaW, &areaH);
@@ -75,7 +74,15 @@ Window::Window(int width, int height, const std::string &titleText, bool hidden)
 float Window::contentScale() const {
     float x = 1, y = 1;
     glfwGetWindowContentScale(window_, &x, &y);
-    return std::isfinite(x) && x > 0 ? x : 1;
+    // macOS scales points to pixels itself: only what's left over is ours
+    return std::isfinite(x) && x > 0 ? x / pixelRatio() : 1;
+}
+
+float Window::pixelRatio() const {
+    int w = 0, h = 0, fw = 0, fh = 0;
+    glfwGetWindowSize(window_, &w, &h);
+    glfwGetFramebufferSize(window_, &fw, &fh);
+    return w > 0 && fw > 0 ? float(fw) / float(w) : 1;
 }
 
 namespace {
@@ -143,6 +150,7 @@ void Window::loadFonts(float ui, const ui::Theme &theme, const std::filesystem::
     if (std::filesystem::exists(font)) {
         ImFontConfig config;
         config.FontBuilderFlags = ImGuiFreeTypeBuilderFlags_LightHinting;
+        config.RasterizerDensity = pixelRatio(); // sharp on a Retina Mac
         const auto add = [&](const std::filesystem::path &file, float size, const ImWchar *glyphs = nullptr) {
             return io.Fonts->AddFontFromFileTTF(file.c_str(), size, &config, glyphs ? glyphs : ranges);
         };

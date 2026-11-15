@@ -46,8 +46,11 @@ class Window {
     // Loads the fonts at the interface scale; between frames only. The theme's font files (in `fontDirectory`) or
     // family (fontconfig name) at its point size replace DejaVu Sans.
     void loadFonts(float ui, const ui::Theme &theme = {}, const std::filesystem::path &fontDirectory = {});
-    // The desktop's UI scale for this window (GNOME at 200 %: 2).
+    // The desktop's UI scale for this window (GNOME at 200 %: 2), in window units: 1 on a Retina Mac, whose window
+    // units are already points.
     float contentScale() const;
+    // Framebuffer pixels per window unit (2 on a Retina Mac, 1 on X11).
+    float pixelRatio() const;
     // The touchpad pinch going on, read in beginFrame.
     const Pinch &pinch() const {
         return *pinch_;
