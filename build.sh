@@ -9,9 +9,14 @@ cd "$(dirname "$0")"
 
 preset=${1:-release}
 
-available_gb=$(awk '/MemAvailable/ {print int($2 / 1048576)}' /proc/meminfo)
+if [[ -r /proc/meminfo ]]; then
+    available_gb=$(awk '/MemAvailable/ {print int($2 / 1048576)}' /proc/meminfo)
+else
+    available_gb=$(($(sysctl -n hw.memsize) / 1073741824)) # macOS: no "available" figure, use the total
+fi
+cores=$(getconf _NPROCESSORS_ONLN)
 jobs=$(((available_gb - 4) / 2))
-((jobs > $(nproc))) && jobs=$(nproc)
+((jobs > cores)) && jobs=$cores
 ((jobs < 1)) && jobs=1
 jobs=${NOTGROOT_JOBS:-$jobs}
 
