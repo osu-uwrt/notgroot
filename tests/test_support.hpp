@@ -17,7 +17,9 @@ class ScratchCopy {
   public:
     explicit ScratchCopy(const std::string &fixture) {
         std::random_device random;
-        path_ = std::filesystem::temp_directory_path() / ("notgroot-test-" + std::to_string(random()));
+        // canonical: macOS' temp dir is under /var, a symlink to /private/var, and the workspace reports real paths
+        path_ = std::filesystem::canonical(std::filesystem::temp_directory_path()) /
+                ("notgroot-test-" + std::to_string(random()));
         std::filesystem::copy(data(fixture), path_, std::filesystem::copy_options::recursive);
     }
     ~ScratchCopy() {
